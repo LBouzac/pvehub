@@ -689,7 +689,7 @@ async function runExec() {
   S.execBusy = true; $("#runCmd").disabled = true; $("#runCmd").textContent = "Exécution…";
   const entry = { command, label, at: Date.now() };
   try { Object.assign(entry, await api("/api/exec", { body: { ...t, command } })); }
-  catch (e) { entry.code = -1; entry.output = e.message; }
+  catch (e) { entry.code = -1; entry.output = e instanceof TypeError ? "Connexion coupée avant la fin. Si la commande redémarre PVE Hub (mise à jour), c'est normal : recharge la page." : e.message; }
   S.execBusy = false; $("#runCmd").disabled = false; $("#runCmd").textContent = "Exécuter";
   entry.output = (entry.output || "").slice(-8000);
   S.execLog.unshift(entry); S.execLog = S.execLog.slice(0, 15); store.set("pvehub.exec", S.execLog);

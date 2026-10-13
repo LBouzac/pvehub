@@ -65,7 +65,9 @@ if [ "${1:-}" = update ]; then
   push_app "$CTID"
   setup_exec "$CTID" || true
   pct exec "$CTID" -- chown -R pvehub /opt/pvehub
-  pct exec "$CTID" -- systemctl restart pvehub
+  # redémarrage différé : si la mise à jour est lancée depuis l'onglet Commandes, la réponse arrive avant la coupure
+  pct exec "$CTID" -- systemd-run --quiet --on-active=3 systemctl restart pvehub
+  echo "PVE Hub redémarre dans 3 secondes."
   echo "✅ Mis à jour."; exit 0
 fi
 
