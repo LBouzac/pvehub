@@ -10,7 +10,9 @@ import json
 import os
 import re
 import secrets
+import shlex
 import ssl
+import subprocess
 import sys
 import time
 import urllib.error
@@ -42,12 +44,15 @@ PVE_TOKEN = os.environ.get("PVE_TOKEN", "")                   # user@realm!id=se
 PVE_VERIFY = os.environ.get("PVE_VERIFY_SSL", "false").lower() == "true"
 HERMES_URL = os.environ.get("HERMES_URL", "").rstrip("/")     # http://192.168.1.20:8642
 HERMES_KEY = os.environ.get("HERMES_KEY", "")
-HERMES_MODEL = os.environ.get("HERMES_MODEL", "hermes-agent")
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 APP_SECRET = (os.environ.get("APP_SECRET") or secrets.token_hex(32)).encode()
 HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = int(os.environ.get("PORT", "8080"))
 SESSION_DAYS = 30
+# Commandes : SSH root vers l'hôte avec la clé posée par l'installeur (absente = section désactivée)
+SSH_DIR = os.environ.get("SSH_DIR", os.path.join(BASE, "ssh"))
+SSH_KEY = os.path.join(SSH_DIR, "id_ed25519")
+EXEC_ENABLED = os.path.isfile(SSH_KEY) and os.environ.get("EXEC_ENABLED", "true").lower() != "false"
 
 if not PVE_URL or not PVE_TOKEN:
     sys.exit("PVE_URL et PVE_TOKEN sont obligatoires (voir .env).")
@@ -61,7 +66,9 @@ RE_NODE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.-]{0,62}$")
 RE_SNAP = re.compile(r"^[A-Za-z][A-Za-z0-9_-]{1,39}$")
 RE_STORE = re.compile(r"^[A-Za-z][A-Za-z0-9_.-]{0,63}$")
 RE_UPID = re.compile(r"^UPID:[A-Za-z0-9:._@!-]+$")
+RE_RUN = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 POWER = {"start", "shutdown", "stop", "reboot"}
+APPROVAL_CHOICES = {"once", "session", "always", "deny"}
 
 
 class ApiError(Exception):
@@ -100,6 +107,41 @@ def pve(method, path, params=None, timeout=30):
                        f"Proxmox : {e.reason} {detail}".strip())
     except (urllib.error.URLError, OSError) as e:
         raise ApiError(502, f"Proxmox injoignable : {getattr(e, 'reason', e)}")
+
+
+def hermes(method, path, body=None, stream=False):
+    if not HERMES_URL:
+        raise ApiError(503, "Hermes n'est pas configuré (HERMES_URL)")
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(f"{HERMES_URL}{path}", data=data, method=method)
+    req.add_header("Authorization", f"Bearer {HERMES_KEY}")
+    if data is not None:
+        req.add_header("Content-Type", "application/json")
+    if stream:
+        req.add_header("Accept", "text/event-stream")
+    try:
+        r = urllib.request.urlopen(req, timeout=900 if stream else 30)
+    except urllib.error.HTTPError as e:
+        raise ApiError(502, f"Hermes : {e.code} {e.read().decode(errors='replace')[:200]}")
+    except (urllib.error.URLError, OSError) as e:
+        raise ApiError(502, f"Hermes injoignable : {getattr(e, 'reason', e)}")
+    if stream:
+        return r
+    with r:
+        return json.loads(r.read() or b"{}")
+
+
+def run_ssh(remote, timeout=60):
+    host = urllib.parse.urlsplit(PVE_URL).hostname
+    cmd = ["ssh", "-i", SSH_KEY, "-o", f"UserKnownHostsFile={SSH_DIR}/known_hosts",
+           "-o", "StrictHostKeyChecking=yes", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
+           "-o", "LogLevel=ERROR", f"root@{host}", remote]
+    try:
+        p = subprocess.run(cmd, capture_output=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return 124, f"(délai dépassé : {timeout} s)"
+    out = (p.stdout + p.stderr).decode(errors="replace")
+    return p.returncode, out[-60000:]
 
 
 def guest_args(d):
@@ -307,19 +349,16 @@ class Handler(BaseHTTPRequestHandler):
             summary = cluster_summary()
         except ApiError as e:
             summary = f"(état indisponible : {e.msg})"
+        if msgs[-1]["role"] != "user":
+            raise ApiError(400, "Le dernier message doit venir de toi")
         system = SYSTEM_PROMPT.format(now=time.strftime("%d/%m/%Y %H:%M"), summary=summary)
-        payload = json.dumps({"model": HERMES_MODEL, "stream": True,
-                              "messages": [{"role": "system", "content": system}] + msgs}).encode()
-        req = urllib.request.Request(f"{HERMES_URL}/v1/chat/completions", data=payload, method="POST")
-        req.add_header("Content-Type", "application/json")
-        req.add_header("Authorization", f"Bearer {HERMES_KEY}")
-        req.add_header("Accept", "text/event-stream")
-        try:
-            upstream = urllib.request.urlopen(req, timeout=900)
-        except urllib.error.HTTPError as e:
-            raise ApiError(502, f"Hermes : {e.code} {e.read().decode(errors='replace')[:200]}")
-        except (urllib.error.URLError, OSError) as e:
-            raise ApiError(502, f"Hermes injoignable : {getattr(e, 'reason', e)}")
+        # API « runs » : seule à exposer les demandes d'autorisation de Hermes (approval.request)
+        run = hermes("POST", "/v1/runs", {"input": msgs[-1]["content"], "instructions": system,
+                                           "conversation_history": msgs[:-1]})
+        run_id = str(run.get("run_id", ""))
+        if not RE_RUN.match(run_id):
+            raise ApiError(502, "Hermes : réponse inattendue")
+        upstream = hermes("GET", f"/v1/runs/{run_id}/events", stream=True)
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-store")
@@ -329,6 +368,8 @@ class Handler(BaseHTTPRequestHandler):
         self.close_connection = True
         with upstream:
             try:
+                self.wfile.write(f'data: {{"event": "pvehub.run", "run_id": "{run_id}"}}\n\n'.encode())
+                self.wfile.flush()
                 for line in upstream:
                     self.wfile.write(line)
                     if line in (b"\n", b"\r\n"):
@@ -344,7 +385,43 @@ def r_overview(_):
     nodes = pve("GET", "/nodes") or []
     guests = pve("GET", "/cluster/resources", {"type": "vm"}) or []
     storage = pve("GET", "/cluster/resources", {"type": "storage"}) or []
-    return {"nodes": nodes, "guests": guests, "storage": storage, "hermes": bool(HERMES_URL)}
+    return {"nodes": nodes, "guests": guests, "storage": storage, "hermes": bool(HERMES_URL), "exec": EXEC_ENABLED}
+
+
+def r_exec(d):
+    if not EXEC_ENABLED:
+        raise ApiError(403, "Commandes désactivées (relance l'installeur pour les activer)")
+    command = str(d.get("command", "")).strip()
+    if not command or len(command) > 4000:
+        raise ApiError(400, "Commande vide ou trop longue")
+    t0 = time.time()
+    if d.get("type") in (None, "", "host"):
+        code, out = run_ssh(f"bash -lc {shlex.quote(command)}")
+    else:
+        # shortcut: SSH vers l'hôte de PVE_URL uniquement, les machines d'un autre nœud échouent ; passer par le nœud de la machine si cluster
+        _node, typ, vmid = guest_args(d)
+        if typ == "lxc":
+            code, out = run_ssh(f"pct exec {vmid} -- sh -c {shlex.quote(command)}")
+        else:
+            code, out = run_ssh(f"qm guest exec {vmid} --timeout 55 -- sh -c {shlex.quote(command)}")
+            try:  # qm renvoie du JSON : on extrait la vraie sortie de la VM
+                j = json.loads(out)
+                code = j.get("exitcode", code)
+                out = (j.get("out-data", "") + j.get("err-data", "")) or out
+            except ValueError:
+                if "agent" in out.lower():
+                    out += "\n(Agent QEMU absent ou arrêté dans la VM : installe qemu-guest-agent.)"
+    return {"code": code, "output": out, "ms": int((time.time() - t0) * 1000)}
+
+
+def r_approval(d):
+    run_id, choice = str(d.get("run_id", "")), d.get("choice")
+    if not RE_RUN.match(run_id) or choice not in APPROVAL_CHOICES:
+        raise ApiError(400, "Demande invalide")
+    body = {"choice": choice}
+    if isinstance(d.get("request_id"), str) and RE_RUN.match(d["request_id"]):
+        body["request_id"] = d["request_id"]
+    return hermes("POST", f"/v1/runs/{run_id}/approval", body)
 
 
 def r_rrd(q):
@@ -490,6 +567,8 @@ ROUTES = {
     ("GET", "/api/task"): r_task,
     ("GET", "/api/tasks"): r_tasks,
     ("POST", "/api/chat"): Handler.chat,
+    ("POST", "/api/chat/approval"): r_approval,
+    ("POST", "/api/exec"): r_exec,
 }
 
 

@@ -6,7 +6,10 @@ Petite app web pour piloter ton Proxmox depuis le téléphone, avec Hermes inté
 - Machines (VM et CT) : démarrer, éteindre, redémarrer, forcer l'arrêt
 - Snapshots : créer, restaurer, supprimer
 - Sauvegardes : lancer maintenant, restaurer
+- Commandes : lancer une commande sur l'hôte, dans un conteneur ou une VM (agent QEMU requis) et voir le résultat
 - Hermes : il reçoit l'état du serveur à chaque message et peut proposer des actions, que tu valides d'un tap
+- Autorisations : Hermes te demande la permission avant ses commandes sensibles (Autoriser / Pour la session / Toujours / Refuser),
+  et tu peux l'autoriser d'avance à démarrer, éteindre, redémarrer, snapshoter ou sauvegarder (bouton bouclier dans l'onglet Hermes)
 
 Ultra léger : un conteneur Debian de 128 Mo, Python seul, aucune dépendance, aucun build.
 L'app ne rafraîchit les données que lorsqu'elle est ouverte à l'écran.
@@ -48,7 +51,13 @@ confirmation, puis l'exécute avec son propre jeton.
 bash <(curl -fsSL https://raw.githubusercontent.com/LBouzac/pvehub/main/pvehub-install.sh) update <ID-du-conteneur>
 ```
 
+La mise à jour demande si tu veux la section Commandes : « o » crée une clé SSH dans le conteneur et l'autorise
+en root sur l'hôte ; « n » la retire.
+
 ## Sécurité
+
+- Section Commandes : la clé SSH du conteneur donne un accès root à l'hôte. Quiconque a le mot de passe de l'app peut donc
+  tout faire sur le serveur. Choisis un mot de passe solide, ou réponds « n » pour désactiver.
 
 - Accès protégé par mot de passe (cookie de session 30 jours).
 - Fait pour le réseau local. Pour y accéder de l'extérieur, passe par un VPN (Tailscale, WireGuard) plutôt que d'ouvrir un port.

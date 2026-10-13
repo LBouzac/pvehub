@@ -33,12 +33,38 @@ push_app() {  # $1 = CTID
   for f in index.html manifest.webmanifest icon.svg; do pct push "$1" "$WORK/static/$f" "/opt/pvehub/static/$f"; done
 }
 
+AUTH=/root/.ssh/authorized_keys
+setup_exec() {  # $1 = CTID — section Commandes : clé SSH du conteneur autorisée en root sur l'hôte
+  local pub host
+  if [ "$(ask "Activer la section Commandes ? (accès root à l'hôte par SSH) o/n" "o")" != o ]; then
+    pub=$(pct exec "$1" -- cat /opt/pvehub/ssh/id_ed25519.pub 2>/dev/null || true)
+    [ -n "$pub" ] && grep -vF "$pub" "$AUTH" > "$WORK/ak" && cat "$WORK/ak" > "$AUTH"
+    pct exec "$1" -- rm -rf /opt/pvehub/ssh
+    echo "Commandes désactivées."; return
+  fi
+  pct exec "$1" -- bash -c "command -v ssh >/dev/null || { apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openssh-client >/dev/null; }
+    mkdir -p /opt/pvehub/ssh/.ssh && cd /opt/pvehub/ssh
+    usermod -d /opt/pvehub/ssh pvehub  # ssh veut un ~/.ssh existant, sinon il râle à chaque commande
+    [ -f id_ed25519 ] || ssh-keygen -q -t ed25519 -N '' -C pvehub -f id_ed25519"
+  pub=$(pct exec "$1" -- cat /opt/pvehub/ssh/id_ed25519.pub)
+  # restrict : pas de redirection de ports ni d'agent, seulement des commandes
+  grep -qF "$pub" "$AUTH" 2>/dev/null || echo "restrict $pub" >> "$AUTH"
+  host=$(pct exec "$1" -- sed -n 's|^PVE_URL=https\?://\([^:/]*\).*|\1|p' /opt/pvehub/.env)
+  ssh-keyscan -t ed25519 "$host" 2>/dev/null > "$WORK/kh"
+  [ -s "$WORK/kh" ] || { echo "❌ Impossible de lire la clé SSH de l'hôte $host."; return 1; }
+  pct push "$1" "$WORK/kh" /opt/pvehub/ssh/known_hosts
+  pct exec "$1" -- bash -c "chown -R pvehub /opt/pvehub/ssh && chmod 700 /opt/pvehub/ssh && chmod 600 /opt/pvehub/ssh/id_ed25519"
+  echo "Commandes activées."
+}
+
 unpack
 
 if [ "${1:-}" = update ]; then
   CTID=${2:?usage : bash pvehub-install.sh update <CTID>}
   say "Mise à jour de PVE Hub dans le CT $CTID"
   push_app "$CTID"
+  setup_exec "$CTID" || true
+  pct exec "$CTID" -- chown -R pvehub /opt/pvehub
   pct exec "$CTID" -- systemctl restart pvehub
   echo "✅ Mis à jour."; exit 0
 fi
@@ -91,6 +117,7 @@ APP_SECRET=$(tr -dc 'a-f0-9' </dev/urandom | head -c 64)
 PORT=8080
 EOF
 pct push "$CTID" "$WORK/env" /opt/pvehub/.env --perms 600
+setup_exec "$CTID" || true
 cat > "$WORK/unit" <<'EOF'
 [Unit]
 Description=PVE Hub

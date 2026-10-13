@@ -3,138 +3,302 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#0f1115">
+<meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="PVE Hub">
 <title>PVE Hub</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icon.svg">
 <link rel="apple-touch-icon" href="/icon.svg">
 <style>
-:root{--bg:#f4f5f7;--card:#fff;--fg:#14161a;--mute:#6b7280;--line:#e5e7eb;--acc:#e5701a;--acc2:#2563eb;--ok:#16a34a;--bad:#dc2626;--warn:#d97706;--chip:#eef0f3;--r:14px}
-@media (prefers-color-scheme:dark){:root{--bg:#0f1115;--card:#181b21;--fg:#e8eaed;--mute:#8b93a1;--line:#262a32;--chip:#22262e;--acc2:#60a5fa}}
+:root{
+  --bg:#f2f2f7;--card:#fff;--card2:#f2f2f7;--label:#000;--label2:rgba(60,60,67,.6);--label3:rgba(60,60,67,.3);
+  --sep:rgba(60,60,67,.29);--fill:rgba(120,120,128,.12);--fill2:rgba(120,120,128,.2);
+  --blue:#007aff;--green:#34c759;--red:#ff3b30;--orange:#ff9500;--purple:#af52de;--teal:#30b0c7;--indigo:#5856d6;--gray:#8e8e93;
+  --bar:rgba(249,249,249,.82);--bubble:#e9e9eb;--code:#f2f2f7;
+  --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",system-ui,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#000;--card:#1c1c1e;--card2:#2c2c2e;--label:#fff;--label2:rgba(235,235,245,.6);--label3:rgba(235,235,245,.3);
+  --sep:rgba(84,84,88,.65);--fill:rgba(118,118,128,.24);--fill2:rgba(118,118,128,.32);
+  --blue:#0a84ff;--green:#30d158;--red:#ff453a;--orange:#ff9f0a;--purple:#bf5af2;--teal:#40c8e0;--indigo:#5e5ce6;--gray:#98989d;
+  --bar:rgba(22,22,22,.82);--bubble:#26252a;--code:#2c2c2e;
+}}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
-input,textarea,select{font:inherit;color:var(--fg);background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;width:100%}
-header{position:sticky;top:0;z-index:5;background:var(--bg);padding:calc(env(safe-area-inset-top) + 10px) 16px 8px;display:flex;align-items:center;gap:10px}
-header h1{font-size:20px;margin:0;flex:1}
-main{padding:0 16px calc(84px + env(safe-area-inset-bottom));max-width:760px;margin:0 auto}
-nav{position:fixed;bottom:0;left:0;right:0;z-index:6;display:flex;background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
-nav button{flex:1;padding:10px 0 8px;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:12px;color:var(--mute)}
-nav button.on{color:var(--acc)}
-nav svg{width:22px;height:22px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin-bottom:12px}
-.row{display:flex;align-items:center;gap:10px}
-.grow{flex:1;min-width:0}
-.mute{color:var(--mute);font-size:13px}
-.t{font-weight:600}
-.ell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.bar{height:6px;background:var(--chip);border-radius:3px;overflow:hidden;margin-top:4px}
-.bar i{display:block;height:100%;background:var(--acc2);border-radius:3px;transition:width .4s}
-.bar i.hi{background:var(--warn)}.bar i.crit{background:var(--bad)}
-.stats{display:grid;grid-template-columns:1fr 1fr;gap:10px 16px;margin-top:10px}
-.dot{width:9px;height:9px;border-radius:50%;background:var(--mute);flex:none}
-.dot.running,.dot.online{background:var(--ok)}.dot.paused{background:var(--warn)}
-.tag{font-size:11px;font-weight:600;padding:2px 6px;border-radius:6px;background:var(--chip);color:var(--mute)}
-.chips{display:flex;gap:8px;overflow-x:auto;padding:2px 0 10px}
-.chip{padding:6px 12px;border-radius:999px;background:var(--chip);font-size:13px;white-space:nowrap}
-.chip.on{background:var(--acc);color:#fff}
-.list .item{display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--line)}
-.list .item:last-child{border-bottom:0}
-.list{padding:0}
-.btns{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
-.btn{padding:10px 6px;border-radius:10px;background:var(--chip);font-size:13px;font-weight:600;text-align:center}
-.btn:disabled{opacity:.35}
-.btn.pri{background:var(--acc);color:#fff}
-.btn.danger{color:var(--bad)}
-.sm{padding:6px 10px;font-size:12px;border-radius:8px}
-h2{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--mute);margin:18px 2px 8px}
-canvas{width:100%;height:110px;display:block}
-.legend{display:flex;gap:12px;font-size:12px;color:var(--mute);margin-bottom:4px}
-.legend b{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:4px}
-.sheet{position:fixed;inset:0;z-index:10;background:var(--bg);overflow-y:auto;transform:translateY(100%);transition:transform .25s ease}
-.sheet.open{transform:none}
-.back{font-size:15px;color:var(--acc);padding:6px 0}
-.toasts{position:fixed;left:12px;right:12px;top:calc(56px + env(safe-area-inset-top));z-index:20;display:flex;flex-direction:column;gap:6px;pointer-events:none;align-items:center}
-.toast{background:var(--fg);color:var(--bg);padding:10px 14px;border-radius:12px;font-size:14px;max-width:520px;box-shadow:0 4px 20px #0003}
-.modal{position:fixed;inset:0;z-index:30;background:#0007;display:flex;align-items:flex-end;justify-content:center}
-.modal .box{background:var(--card);width:100%;max-width:520px;border-radius:18px 18px 0 0;padding:20px 16px calc(16px + env(safe-area-inset-bottom))}
-.modal .box p{margin:0 0 16px}
-.modal .btns{grid-template-columns:1fr 1fr}
-/* chat */
-#chat{display:flex;flex-direction:column;gap:10px;padding-bottom:70px}
-.msg{max-width:88%;padding:10px 12px;border-radius:16px;word-wrap:break-word}
-.msg.user{align-self:flex-end;background:var(--acc);color:#fff;border-bottom-right-radius:4px}
-.msg.assistant{align-self:flex-start;background:var(--card);border:1px solid var(--line);border-bottom-left-radius:4px}
-.msg.note{align-self:center;font-size:12px;color:var(--mute);background:none;padding:2px}
-.msg pre{background:var(--chip);padding:8px;border-radius:8px;overflow-x:auto;font-size:12px;margin:6px 0}
-.msg code{font-size:13px;background:var(--chip);padding:1px 4px;border-radius:4px}
-.msg.user code{background:#fff3}
-.tools{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:4px}
-.tools span{font-size:11px;color:var(--mute);background:var(--chip);padding:2px 6px;border-radius:6px}
-.act{border:1px solid var(--acc);border-radius:10px;padding:8px 10px;margin:6px 0;display:flex;align-items:center;gap:8px}
-.act .grow{font-size:13px}
-.composer{position:fixed;left:0;right:0;bottom:calc(58px + env(safe-area-inset-bottom));z-index:6;background:var(--bg);padding:8px 12px;display:flex;gap:8px;max-width:760px;margin:0 auto}
-.composer textarea{resize:none;height:42px;max-height:120px;border-radius:21px;padding:10px 14px}
-.send{width:42px;height:42px;border-radius:50%;background:var(--acc);color:#fff;flex:none;display:grid;place-items:center}
-.typing::after{content:"▍";animation:b 1s steps(2) infinite}
-@keyframes b{50%{opacity:0}}
-.empty{text-align:center;color:var(--mute);padding:40px 10px}
-#login{max-width:360px;margin:20vh auto 0;padding:0 16px}
+html,body{margin:0;background:var(--bg);color:var(--label);font:17px/1.3 var(--font);letter-spacing:-.01em;-webkit-font-smoothing:antialiased}
+body{overscroll-behavior-y:none}
+button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;padding:0;letter-spacing:inherit}
+input,textarea,select{font:inherit;color:var(--label);letter-spacing:inherit}
 .hide{display:none!important}
+.mute{color:var(--label2)}
+.ell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.grow{flex:1;min-width:0}
+.row{display:flex;align-items:center;gap:12px}
+
+/* barre de navigation */
+.navbar{position:sticky;top:0;z-index:20;height:calc(44px + env(safe-area-inset-top));padding:env(safe-area-inset-top) 8px 0;display:flex;align-items:center;
+  background:transparent;transition:background .2s,border-color .2s;border-bottom:.5px solid transparent}
+.navbar.scrolled{background:var(--bar);-webkit-backdrop-filter:saturate(180%) blur(20px);backdrop-filter:saturate(180%) blur(20px);border-bottom-color:var(--sep)}
+.navbar .nt{position:absolute;left:0;right:0;text-align:center;font-weight:600;font-size:17px;opacity:0;transition:opacity .2s;pointer-events:none}
+.navbar.scrolled .nt{opacity:1}
+.navbar .side{min-width:80px;display:flex;align-items:center;z-index:1}
+.navbar .side.r{justify-content:flex-end;margin-left:auto}
+.navbtn{color:var(--blue);font-size:17px;padding:8px;display:flex;align-items:center;gap:2px}
+.navbtn svg{width:24px;height:24px}
+.large{font-size:34px;font-weight:700;letter-spacing:.01em;margin:2px 16px 8px;line-height:1.2}
+.sub{margin:-4px 16px 12px;font-size:15px}
+.live{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--label2)}
+.live i{width:7px;height:7px;border-radius:50%;background:var(--green)}
+.live.off i{background:var(--red)}
+
+main{padding-bottom:calc(100px + env(safe-area-inset-bottom));max-width:720px;margin:0 auto}
+
+/* barre d'onglets */
+.tabbar{position:fixed;bottom:0;left:0;right:0;z-index:20;display:flex;background:var(--bar);-webkit-backdrop-filter:saturate(180%) blur(20px);backdrop-filter:saturate(180%) blur(20px);
+  border-top:.5px solid var(--sep);padding-bottom:env(safe-area-inset-bottom)}
+.tabbar button{flex:1;padding:7px 0 4px;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:10px;font-weight:500;color:var(--gray)}
+.tabbar button.on{color:var(--blue)}
+.tabbar svg{width:26px;height:26px}
+
+/* listes groupées */
+.hdr{font-size:13px;color:var(--label2);text-transform:uppercase;margin:22px 32px 7px;letter-spacing:0;display:flex;align-items:flex-end}
+.hdr .grow{min-width:0}
+.hdr button{color:var(--blue);text-transform:none;font-size:15px}
+.ftr{font-size:13px;color:var(--label2);margin:7px 32px 0;line-height:1.35}
+.group{background:var(--card);border-radius:12px;margin:0 16px;overflow:hidden}
+.cell{display:flex;align-items:center;gap:12px;min-height:44px;padding:0 16px;position:relative;width:100%;text-align:left}
+.cell::after{content:"";position:absolute;right:0;bottom:0;left:var(--inset,16px);border-bottom:.5px solid var(--sep)}
+.cell:last-child::after{display:none}
+.cell.icon{--inset:60px}
+.cell .body{flex:1;min-width:0;padding:11px 0}
+.cell .t{font-size:17px}
+.cell .s{font-size:13px;color:var(--label2);margin-top:2px}
+.cell .v{color:var(--label2);font-size:17px;text-align:right;flex:none}
+.tap:active{background:var(--fill)}
+.chev{width:8px;height:13px;flex:none;color:var(--label3)}
+.ico{width:30px;height:30px;border-radius:7px;display:grid;place-items:center;color:#fff;flex:none}
+.ico svg{width:19px;height:19px}
+.cell.act{color:var(--blue)}
+.cell.act.danger{color:var(--red)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--gray);flex:none}
+.dot.running,.dot.online{background:var(--green)}.dot.paused{background:var(--orange)}
+.pill{font-size:12px;font-weight:600;padding:2px 7px;border-radius:6px;background:var(--fill);color:var(--label2);flex:none}
+.bar{height:4px;background:var(--fill);border-radius:2px;overflow:hidden;margin-top:6px}
+.bar i{display:block;height:100%;border-radius:2px;background:var(--blue);transition:width .5s}
+.bar i.hi{background:var(--orange)}.bar i.crit{background:var(--red)}
+
+/* tuiles */
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:0 16px}
+.tile{background:var(--card);border-radius:14px;padding:12px 14px 14px;text-align:left}
+.tile .k{font-size:13px;font-weight:600;color:var(--label2);display:flex;align-items:center;gap:6px}
+.tile .k svg{width:16px;height:16px}
+.tile .n{font-size:28px;font-weight:700;margin-top:6px;letter-spacing:-.02em}
+.tile .n small{font-size:15px;font-weight:500;color:var(--label2)}
+
+canvas{width:100%;height:120px;display:block}
+.chartbox{padding:12px 16px 14px}
+.legend{display:flex;gap:14px;font-size:13px;color:var(--label2);margin-bottom:8px;align-items:center}
+.legend b{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}
+
+/* contrôle segmenté + recherche */
+.search{margin:0 16px 10px;display:flex;align-items:center;gap:6px;background:var(--fill);border-radius:10px;padding:0 8px;height:36px}
+.search svg{width:16px;height:16px;color:var(--label2);flex:none}
+.search input{flex:1;border:0;background:none;outline:0;font-size:17px;min-width:0}
+.seg{display:flex;background:var(--fill);border-radius:9px;padding:2px;margin:0 16px 14px}
+.seg button{flex:1;font-size:13px;font-weight:500;padding:6px 4px;border-radius:7px}
+.seg button.on{background:var(--card);box-shadow:0 3px 8px rgba(0,0,0,.12),0 3px 1px rgba(0,0,0,.04);font-weight:600}
+@media (prefers-color-scheme:dark){.seg button.on{background:#636366}}
+
+/* actions machine */
+.actions{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:0 16px}
+.actions button{background:var(--card);border-radius:14px;padding:12px 4px 10px;display:flex;flex-direction:column;align-items:center;gap:6px;font-size:12px;font-weight:500}
+.actions button svg{width:24px;height:24px}
+.actions button:disabled{opacity:.35}
+.actions .go{color:var(--green)}.actions .pw{color:var(--orange)}.actions .rb{color:var(--blue)}.actions .kill{color:var(--red)}
+
+/* vue détail (poussée depuis la droite) */
+.push{position:fixed;inset:0;z-index:30;background:var(--bg);overflow-y:auto;transform:translateX(100%);transition:transform .35s cubic-bezier(.2,.8,.2,1);-webkit-overflow-scrolling:touch}
+.push.open{transform:none;box-shadow:-10px 0 30px rgba(0,0,0,.15)}
+.push .navbar{position:sticky}
+
+/* feuilles modales */
+.modal{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.35);display:flex;align-items:flex-end;justify-content:center;animation:fade .2s}
+.modal.center{align-items:center}
+@keyframes fade{from{opacity:0}}
+@keyframes up{from{transform:translateY(100%)}}
+@keyframes pop{from{transform:scale(1.1);opacity:0}}
+.sheet-as{width:100%;max-width:500px;padding:0 8px calc(8px + env(safe-area-inset-bottom));animation:up .3s cubic-bezier(.2,.8,.2,1)}
+.as-g{background:var(--bar);-webkit-backdrop-filter:blur(30px);backdrop-filter:blur(30px);border-radius:14px;overflow:hidden;margin-bottom:8px}
+.as-title{padding:14px 16px;text-align:center;font-size:13px;color:var(--label2);border-bottom:.5px solid var(--sep);line-height:1.35}
+.as-title b{display:block;color:var(--label2);font-weight:600;margin-bottom:2px}
+.as-btn{display:block;width:100%;height:57px;font-size:20px;color:var(--blue);border-bottom:.5px solid var(--sep)}
+.as-btn:last-child{border-bottom:0}
+.as-btn.danger{color:var(--red)}
+.as-btn.cancel{background:var(--card);border-radius:14px;font-weight:600}
+.alert{width:270px;background:var(--bar);-webkit-backdrop-filter:blur(30px);backdrop-filter:blur(30px);border-radius:14px;overflow:hidden;animation:pop .2s;text-align:center}
+.alert .ab{padding:19px 16px 15px}
+.alert h3{margin:0 0 4px;font-size:17px;font-weight:600}
+.alert p{margin:0 0 10px;font-size:13px}
+.alert input,.alert select{width:100%;margin-top:8px;padding:7px 8px;font-size:15px;border:.5px solid var(--sep);border-radius:7px;background:var(--card);outline:0}
+.alert .abtns{display:flex;border-top:.5px solid var(--sep)}
+.alert .abtns button{flex:1;height:44px;color:var(--blue);font-size:17px}
+.alert .abtns button+button{border-left:.5px solid var(--sep);font-weight:600}
+.card-sheet{width:100%;max-width:560px;max-height:92vh;overflow-y:auto;background:var(--bg);border-radius:12px 12px 0 0;padding-bottom:calc(30px + env(safe-area-inset-bottom));animation:up .35s cubic-bezier(.2,.8,.2,1)}
+.card-sheet .grab{width:36px;height:5px;border-radius:3px;background:var(--label3);margin:6px auto 0}
+.card-sheet .shead{display:flex;align-items:center;padding:12px 16px 4px}
+.card-sheet .shead h2{flex:1;text-align:center;margin:0;font-size:17px;font-weight:600}
+
+/* interrupteur iOS */
+.sw{position:relative;width:51px;height:31px;flex:none}
+.sw input{opacity:0;position:absolute;inset:0;margin:0;cursor:pointer;z-index:1}
+.sw span{position:absolute;inset:0;background:var(--fill2);border-radius:16px;transition:background .25s}
+.sw span::after{content:"";position:absolute;top:2px;left:2px;width:27px;height:27px;border-radius:50%;background:#fff;box-shadow:0 3px 8px rgba(0,0,0,.15),0 3px 1px rgba(0,0,0,.06);transition:transform .25s}
+.sw input:checked+span{background:var(--green)}
+.sw input:checked+span::after{transform:translateX(20px)}
+
+/* bannières */
+.toasts{position:fixed;left:0;right:0;top:calc(8px + env(safe-area-inset-top));z-index:60;display:flex;flex-direction:column;gap:6px;align-items:center;pointer-events:none;padding:0 12px}
+.toast{background:var(--bar);-webkit-backdrop-filter:blur(30px);backdrop-filter:blur(30px);color:var(--label);padding:12px 16px;border-radius:16px;font-size:15px;font-weight:500;
+  max-width:420px;width:100%;box-shadow:0 8px 30px rgba(0,0,0,.18);animation:drop .35s cubic-bezier(.2,.8,.2,1)}
+@keyframes drop{from{transform:translateY(-120%)}}
+
+/* commandes */
+.term{display:block;width:100%;min-height:88px;resize:none;border:0;outline:0;background:none;padding:12px 16px;font:15px/1.4 var(--mono);color:var(--label)}
+.picker{appearance:none;-webkit-appearance:none;border:0;background:none;outline:0;color:var(--label2);font-size:17px;text-align:right;direction:rtl;max-width:60%;padding:0}
+.chips{display:flex;gap:8px;overflow-x:auto;padding:0 16px 4px;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chip{background:var(--card);border-radius:16px;padding:7px 13px;font:13px var(--mono);white-space:nowrap;flex:none}
+.out{margin:0;padding:10px 16px 14px;font:12.5px/1.45 var(--mono);white-space:pre-wrap;word-break:break-word;max-height:340px;overflow-y:auto;color:var(--label)}
+.code-ok{color:var(--green);font-weight:600}.code-bad{color:var(--red);font-weight:600}
+.bigbtn{display:block;margin:12px 16px 0;width:calc(100% - 32px);height:50px;border-radius:12px;background:var(--blue);color:#fff;font-size:17px;font-weight:600}
+.bigbtn:disabled{opacity:.5}
+
+/* chat */
+#chat{display:flex;flex-direction:column;gap:4px;padding:0 12px 80px}
+.msg{max-width:80%;padding:8px 13px;border-radius:19px;word-wrap:break-word;font-size:17px;line-height:1.32}
+.msg.user{align-self:flex-end;background:var(--blue);color:#fff;margin-top:6px}
+.msg.assistant{align-self:flex-start;background:var(--bubble);margin-top:6px}
+.msg.note{align-self:center;font-size:12px;color:var(--label2);background:none;text-align:center;padding:6px 10px;max-width:90%}
+.msg pre{background:var(--code);padding:8px 10px;border-radius:10px;overflow-x:auto;font:12px/1.4 var(--mono);margin:6px 0}
+.msg code{font:14px var(--mono);background:var(--code);padding:1px 4px;border-radius:5px}
+.msg.user code{background:rgba(255,255,255,.2)}
+.tools{display:flex;flex-wrap:wrap;gap:4px;margin:2px 0 4px}
+.tools span{font-size:12px;color:var(--label2);background:var(--card);padding:2px 8px;border-radius:9px;display:inline-flex;align-items:center;gap:4px}
+.inline{background:var(--card);border-radius:14px;padding:10px 12px;margin:8px 0 4px}
+.inline .it{font-size:15px;font-weight:600;display:flex;align-items:center;gap:6px}
+.inline .is{font-size:13px;color:var(--label2);margin-top:3px}
+.inline pre{margin:8px 0 0}
+.ibtns{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.ibtn{flex:1 1 auto;min-width:46%;height:36px;border-radius:9px;background:var(--fill);color:var(--blue);font-size:15px;font-weight:600}
+.ibtn.pri{background:var(--blue);color:#fff}
+.ibtn.no{color:var(--red)}
+.done{font-size:13px;color:var(--green);font-weight:600;margin-top:8px}
+.done.no{color:var(--red)}
+.composer{position:fixed;left:0;right:0;bottom:calc(50px + env(safe-area-inset-bottom));z-index:19;padding:6px 10px;display:flex;gap:8px;align-items:flex-end;
+  background:var(--bar);-webkit-backdrop-filter:saturate(180%) blur(20px);backdrop-filter:saturate(180%) blur(20px);border-top:.5px solid var(--sep)}
+.composer textarea{flex:1;resize:none;height:36px;max-height:120px;border-radius:18px;padding:7px 14px;border:.5px solid var(--sep);background:var(--card);outline:0;font-size:17px;line-height:1.3}
+.send{width:32px;height:32px;border-radius:50%;background:var(--blue);color:#fff;display:grid;place-items:center;flex:none;margin-bottom:2px}
+.send:disabled{background:var(--fill2)}
+.send svg{width:18px;height:18px}
+.typing{display:inline-flex;gap:4px;padding:4px 0}
+.typing i{width:7px;height:7px;border-radius:50%;background:var(--label3);animation:bl 1.2s infinite}
+.typing i:nth-child(2){animation-delay:.2s}.typing i:nth-child(3){animation-delay:.4s}
+@keyframes bl{30%{background:var(--label2)}}
+.empty{text-align:center;color:var(--label2);padding:40px 24px;font-size:15px}
+.empty .chip{display:inline-block;margin:6px 4px 0;font-family:var(--font);font-size:15px;color:var(--blue)}
+
+#login{max-width:340px;margin:0 auto;padding:calc(18vh + env(safe-area-inset-top)) 16px 0;text-align:center}
+#login .logo{width:84px;height:84px;border-radius:20px;margin-bottom:14px}
+#login h1{font-size:28px;margin:0 0 24px}
+#login input{width:100%;height:50px;border-radius:12px;border:0;background:var(--card);padding:0 16px;outline:0;font-size:17px}
+#login .bigbtn{margin:12px 0 0;width:100%}
 </style>
 </head>
 <body>
+
 <div id="login" class="hide">
-  <h1 style="font-size:24px">PVE Hub</h1>
-  <form id="loginForm"><input id="pw" type="password" placeholder="Mot de passe" autocomplete="current-password" autofocus>
-  <button class="btn pri" style="width:100%;margin-top:10px;padding:12px">Se connecter</button></form>
-  <p id="loginErr" class="mute"></p>
+  <img class="logo" src="/icon.svg" alt="">
+  <h1>PVE Hub</h1>
+  <form id="loginForm"><input id="pw" type="password" placeholder="Mot de passe" autocomplete="current-password" aria-label="Mot de passe">
+  <button class="bigbtn">Se connecter</button></form>
+  <p id="loginErr" class="mute" style="font-size:15px"></p>
 </div>
 
 <div id="app" class="hide">
-  <header><h1 id="title">Serveur</h1><span id="live" class="mute"></span></header>
+  <div class="navbar" id="nav"><div class="nt" id="navTitle"></div><div class="side"></div><div class="side r" id="navRight"></div></div>
   <main>
     <section id="v-dash"></section>
     <section id="v-guests" class="hide">
-      <input id="search" type="search" placeholder="Rechercher (nom, ID)…" style="margin-bottom:10px">
-      <div class="chips" id="filters"></div>
-      <div class="card list" id="guestList"></div>
+      <h1 class="large">Machines</h1>
+      <div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="search" type="search" placeholder="Rechercher" aria-label="Rechercher une machine"></div>
+      <div class="seg" id="filters"></div>
+      <div class="group" id="guestList"></div>
     </section>
+    <section id="v-exec" class="hide"></section>
     <section id="v-chat" class="hide">
+      <h1 class="large">Hermes</h1>
       <div id="chat"></div>
       <div class="composer" id="composer">
-        <textarea id="prompt" rows="1" placeholder="Message à Hermes…"></textarea>
-        <button class="send" id="sendBtn" aria-label="Envoyer"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+        <textarea id="prompt" rows="1" placeholder="Message" aria-label="Message à Hermes"></textarea>
+        <button class="send" id="sendBtn" aria-label="Envoyer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
       </div>
     </section>
   </main>
-  <nav>
-    <button data-v="dash" class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 7h.01M7 17h.01"/></svg>Serveur</button>
-    <button data-v="guests"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>Machines</button>
-    <button data-v="chat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a8 8 0 0 1-11.8 7L4 20l1.1-4.6A8 8 0 1 1 21 12z"/></svg>Hermes</button>
+  <nav class="tabbar">
+    <button data-v="dash" class="on"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 4.5A1.5 1.5 0 0 1 5.5 3h13A1.5 1.5 0 0 1 20 4.5v4A1.5 1.5 0 0 1 18.5 10h-13A1.5 1.5 0 0 1 4 8.5zm0 11A1.5 1.5 0 0 1 5.5 14h13a1.5 1.5 0 0 1 1.5 1.5v4a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 19.5zM7 7.5a1 1 0 1 0 0-2 1 1 0 0 0 0 2m0 11a1 1 0 1 0 0-2 1 1 0 0 0 0 2"/></svg>Serveur</button>
+    <button data-v="guests"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg>Machines</button>
+    <button data-v="exec"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4" width="19" height="16" rx="3" fill="currentColor" stroke="none"/><path d="m7 9 3 3-3 3M12.5 15H17" stroke="var(--bar)" stroke-width="2"/></svg>Commandes</button>
+    <button data-v="chat"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3c5 0 9 3.4 9 7.6s-4 7.6-9 7.6c-.9 0-1.8-.1-2.6-.3L5 20.5l.9-3.9C4.1 15.2 3 13 3 10.6 3 6.4 7 3 12 3"/></svg>Hermes</button>
   </nav>
 </div>
 
-<div class="sheet" id="sheet"></div>
-<div class="toasts" id="toasts"></div>
+<div class="push" id="sheet"></div>
+<div class="toasts" id="toasts" role="status" aria-live="polite"></div>
 
 <script>
 "use strict";
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const S = { ov: null, view: "dash", filter: "all", guest: null, chat: [], pending: [], busy: false };
+const S = { ov: null, view: "dash", filter: "all", guest: null, chat: [], pending: [], busy: false, execBusy: false };
 const store = { get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
                 set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} } };
 
-// ---------- formatting
-const fb = n => { n = +n || 0; const u = ["o","Ko","Mo","Go","To"]; let i = 0; while (n >= 1024 && i < 4) { n /= 1024; i++; } return (i < 2 ? n.toFixed(0) : n.toFixed(1)) + " " + u[i]; };
+// ---------- icônes
+const I = {
+  chev: '<svg class="chev" viewBox="0 0 8 13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m1.5 1.5 5 5-5 5"/></svg>',
+  back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m15 5-7 7 7 7"/></svg>',
+  vm: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>',
+  ct: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9z"/><path d="M12 12 4 7.5M12 12l8-4.5M12 12v9"/></svg>',
+  cpu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></svg>',
+  mem: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="7" width="20" height="10" rx="2"/><path d="M6 11v2M10 11v2M14 11v2M18 11v2"/></svg>',
+  disk: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg>',
+  net: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v16M7 20l-3-3M7 20l3-3M17 20V4M17 4l-3 3M17 4l3 3"/></svg>',
+  play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15a1 1 0 0 0 1.5.9l12-7.5a1 1 0 0 0 0-1.8l-12-7.5A1 1 0 0 0 7 4.5"/></svg>',
+  power: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 3v9M6.3 6.3a8 8 0 1 0 11.4 0"/></svg>',
+  reboot: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/></svg>',
+  kill: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="3"/></svg>',
+  snap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>',
+  backup: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 15v4a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-4M12 4v11M8 11l4 4 4-4"/></svg>',
+  shield: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.4 7.5 9.5 4.3-1.1 7.5-4.9 7.5-9.5V6z"/><path d="m9 12 2 2 4-4" stroke-linecap="round"/></svg>',
+  bolt: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>',
+  term: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 7 5 5-5 5M12 17h7"/></svg>',
+  chat: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3c5 0 9 3.4 9 7.6s-4 7.6-9 7.6c-.9 0-1.8-.1-2.6-.3L5 20.5l.9-3.9C4.1 15.2 3 13 3 10.6 3 6.4 7 3 12 3"/></svg>',
+  wrench: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><path d="M14.7 6.3a4 4 0 0 0 5 5L21 13l-8 8-3-3 8-8-1.3-1.3a4 4 0 0 0-5-5L14 6z"/></svg>',
+};
+const icoBox = (svg, color) => `<span class="ico" style="background:var(--${color})">${svg}</span>`;
+
+// ---------- formats
+const fb = n => { n = +n || 0; const u = ["o","Ko","Mo","Go","To"]; let i = 0; while (n >= 1024 && i < 4) { n /= 1024; i++; } return (i < 2 ? n.toFixed(0) : n.toFixed(1)).replace(".", ",") + " " + u[i]; };
 const pct = (a, b) => b ? Math.min(100, a / b * 100) : 0;
 const up = s => { s = +s || 0; const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600); return d ? `${d} j ${h} h` : `${h} h ${Math.floor(s % 3600 / 60)} min`; };
 const bar = p => `<div class="bar"><i class="${p > 90 ? "crit" : p > 75 ? "hi" : ""}" style="width:${p.toFixed(1)}%"></i></div>`;
 const kind = t => t === "qemu" ? "VM" : "CT";
 const STATUS = { running: "En marche", stopped: "Arrêtée", paused: "En pause", online: "En ligne", offline: "Hors ligne" };
+const when = ts => new Date(ts * 1000).toLocaleString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 
 // ---------- api
 async function api(path, opts = {}) {
@@ -148,29 +312,33 @@ async function api(path, opts = {}) {
 }
 const qs = o => new URLSearchParams(o).toString();
 
-// ---------- ui helpers
+// ---------- composants iOS
 function toast(msg, ms = 3500) {
   const el = document.createElement("div"); el.className = "toast"; el.textContent = msg;
   $("#toasts").appendChild(el); setTimeout(() => el.remove(), ms); return el;
 }
-function confirmBox(text, okLabel = "Confirmer", danger = false) {
+// Feuille d'actions : resolve(index du bouton) ou -1
+function actionSheet(title, msg, buttons) {
   return new Promise(res => {
     const m = document.createElement("div"); m.className = "modal";
-    m.innerHTML = `<div class="box"><p>${text}</p><div class="btns"><button class="btn" data-a="0">Annuler</button><button class="btn ${danger ? "danger" : "pri"}" data-a="1">${esc(okLabel)}</button></div></div>`;
-    m.onclick = e => { const a = e.target.dataset.a; if (a !== undefined || e.target === m) { m.remove(); res(a === "1"); } };
+    m.innerHTML = `<div class="sheet-as"><div class="as-g">${title || msg ? `<div class="as-title">${title ? `<b>${title}</b>` : ""}${msg || ""}</div>` : ""}
+      ${buttons.map((b, i) => `<button class="as-btn ${b.danger ? "danger" : ""}" data-i="${i}">${esc(b.label)}</button>`).join("")}</div>
+      <button class="as-btn cancel" data-i="-1">Annuler</button></div>`;
+    m.onclick = e => { const b = e.target.closest("[data-i]"); if (b || e.target === m) { m.remove(); res(b ? +b.dataset.i : -1); } };
     document.body.appendChild(m);
   });
 }
-function promptBox(text, fields) {
+const confirmBox = async (title, msg, label = "Confirmer", danger = false) => (await actionSheet(title, msg, [{ label, danger }])) === 0;
+function alertForm(title, msg, fields) {
   return new Promise(res => {
-    const m = document.createElement("div"); m.className = "modal";
-    m.innerHTML = `<form class="box"><p>${text}</p>${fields.map(f => f.options
-      ? `<select name="${f.name}" style="margin-bottom:10px">${f.options.map(o => `<option>${esc(o)}</option>`).join("")}</select>`
-      : `<input name="${f.name}" placeholder="${esc(f.ph)}" value="${esc(f.value || "")}" style="margin-bottom:10px">`).join("")}
-      <div class="btns"><button type="button" class="btn" data-a="0">Annuler</button><button class="btn pri">Valider</button></div></form>`;
+    const m = document.createElement("div"); m.className = "modal center";
+    m.innerHTML = `<form class="alert"><div class="ab"><h3>${title}</h3>${msg ? `<p class="mute">${msg}</p>` : ""}${fields.map(f => f.options
+      ? `<select name="${f.name}" aria-label="${esc(f.ph || f.name)}">${f.options.map(o => `<option>${esc(o)}</option>`).join("")}</select>`
+      : `<input name="${f.name}" placeholder="${esc(f.ph)}" value="${esc(f.value || "")}" aria-label="${esc(f.ph)}">`).join("")}</div>
+      <div class="abtns"><button type="button" data-a="0">Annuler</button><button>OK</button></div></form>`;
     const form = m.querySelector("form");
     form.onsubmit = e => { e.preventDefault(); const v = Object.fromEntries(new FormData(form)); m.remove(); res(v); };
-    m.onclick = e => { if (e.target.dataset.a === "0" || e.target === m) { m.remove(); res(null); } };
+    m.querySelector("[data-a]").onclick = () => { m.remove(); res(null); };
     document.body.appendChild(m); m.querySelector("input,select")?.focus();
   });
 }
@@ -193,111 +361,122 @@ async function track(res, label) {
   } catch (e) { t.remove(); toast("❌ " + e.message); return e.message; }
 }
 
-// ---------- charts (canvas, sans lib)
+// ---------- graphiques (canvas, sans lib)
+const cssv = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 function chart(cv, rows, series, { max, fmt = v => v.toFixed(0) + " %" } = {}) {
+  if (!cv || !cv.clientWidth) return;
   const dpr = devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
   cv.width = w * dpr; cv.height = h * dpr;
   const c = cv.getContext("2d"); c.scale(dpr, dpr);
-  const css = getComputedStyle(document.documentElement);
   rows = rows.filter(r => series.some(s => Number.isFinite(s.v(r))));
-  if (rows.length < 2) { c.fillStyle = css.getPropertyValue("--mute"); c.font = "12px system-ui"; c.fillText("Pas encore de données", 4, h / 2); return; }
+  if (rows.length < 2) { c.fillStyle = cssv("--label2"); c.font = "13px -apple-system,system-ui"; c.fillText("Pas encore de données", 0, h / 2); return; }
   const top = max ?? Math.max(1, ...rows.flatMap(r => series.map(s => s.v(r) || 0))) * 1.15;
-  const pad = 16, x = i => i / (rows.length - 1) * w, y = v => h - pad - (Math.min(v, top) / top) * (h - pad - 4);
-  c.strokeStyle = css.getPropertyValue("--line"); c.lineWidth = 1;
+  const pad = 4, x = i => i / (rows.length - 1) * w, y = v => h - pad - (Math.min(v, top) / top) * (h - pad - 14);
+  c.strokeStyle = cssv("--sep"); c.lineWidth = .5;
   [0, .5, 1].forEach(f => { c.beginPath(); c.moveTo(0, y(top * f)); c.lineTo(w, y(top * f)); c.stroke(); });
-  c.fillStyle = css.getPropertyValue("--mute"); c.font = "11px system-ui"; c.fillText(fmt(top), 2, 12);
+  c.fillStyle = cssv("--label2"); c.font = "11px -apple-system,system-ui"; c.fillText(fmt(top), 0, 10);
   for (const s of series) {
-    c.beginPath(); c.strokeStyle = s.color; c.lineWidth = 1.8; c.lineJoin = "round";
+    const col = cssv(s.color);
+    c.beginPath(); c.strokeStyle = col; c.lineWidth = 2; c.lineJoin = "round";
     rows.forEach((r, i) => { const v = s.v(r) || 0; i ? c.lineTo(x(i), y(v)) : c.moveTo(x(i), y(v)); });
     c.stroke(); c.lineTo(w, h - pad); c.lineTo(0, h - pad); c.closePath();
-    c.globalAlpha = .12; c.fillStyle = s.color; c.fill(); c.globalAlpha = 1;
+    const g = c.createLinearGradient(0, 0, 0, h); g.addColorStop(0, col + "40"); g.addColorStop(1, col + "00");
+    c.fillStyle = g; c.fill();
   }
 }
-const ORANGE = "#e5701a", BLUE = "#3b82f6", GREEN = "#16a34a";
-const cpuS = { color: ORANGE, v: r => r.cpu * 100 };
-const memS = { color: BLUE, v: r => pct(r.mem ?? r.memused, r.maxmem ?? r.memtotal) };
-const netFmt = v => fb(v) + "/s";
+const cpuS = { color: "--orange", v: r => r.cpu * 100 };
+const memS = { color: "--blue", v: r => pct(r.mem ?? r.memused, r.maxmem ?? r.memtotal) };
+const legend = (items, right = "dernière heure") => `<div class="legend">${items.map(([c, l]) => `<span><b style="background:var(${c})"></b>${l}</span>`).join("")}<span class="grow"></span><span>${right}</span></div>`;
 
-// ---------- vues
+// ---------- navigation
+const TITLES = { dash: "Serveur", guests: "Machines", exec: "Commandes", chat: "Hermes" };
 function setView(v) {
   S.view = v;
-  document.querySelectorAll("nav button").forEach(b => b.classList.toggle("on", b.dataset.v === v));
-  ["dash", "guests", "chat"].forEach(k => $("#v-" + k).classList.toggle("hide", k !== v));
-  $("#title").textContent = { dash: "Serveur", guests: "Machines", chat: "Hermes" }[v];
-  if (v === "chat") { renderChat(); scrollChat(); }
-  render();
+  document.querySelectorAll(".tabbar button").forEach(b => b.classList.toggle("on", b.dataset.v === v));
+  ["dash", "guests", "exec", "chat"].forEach(k => $("#v-" + k).classList.toggle("hide", k !== v));
+  $("#navTitle").textContent = TITLES[v];
+  $("#navRight").innerHTML = v === "chat" && S.ov?.hermes
+    ? `<button class="navbtn" id="permBtn" aria-label="Autorisations">${I.shield}</button>` : v === "chat" ? "" : `<span class="live" id="live"><i></i>en direct</span>`;
+  if (v === "chat") { $("#permBtn") && ($("#permBtn").onclick = openPerms); renderChat(); scrollChat(); }
+  else scrollTo(0, 0);
+  render(); onScroll();
 }
-document.querySelectorAll("nav button").forEach(b => b.onclick = () => setView(b.dataset.v));
+document.querySelectorAll(".tabbar button").forEach(b => b.onclick = () => setView(b.dataset.v));
+function onScroll() { $("#nav").classList.toggle("scrolled", scrollY > 30); }
+addEventListener("scroll", onScroll, { passive: true });
 
 function render() {
   if (!S.ov) return;
   if (S.view === "dash") renderDash();
   if (S.view === "guests") renderGuests();
+  if (S.view === "exec") renderExec();
 }
 
+// ---------- tableau de bord
 function renderDash() {
   const { nodes, guests, storage } = S.ov;
   const real = guests.filter(g => !g.template), run = real.filter(g => g.status === "running").length;
-  let h = `<div class="card row"><div class="grow"><div class="t" style="font-size:22px">${run}<span class="mute" style="font-size:15px"> / ${real.length}</span></div><div class="mute">machines en marche</div></div>
-    <button class="btn sm" onclick="setView('guests')">Voir</button></div>`;
-  for (const n of nodes) {
-    const cpu = (n.cpu || 0) * 100, mem = pct(n.mem, n.maxmem), disk = pct(n.disk, n.maxdisk);
-    h += `<div class="card"><div class="row"><span class="dot ${n.status}"></span><div class="grow t">${esc(n.node)}</div><span class="mute">${n.status === "online" ? "depuis " + up(n.uptime) : STATUS[n.status] || n.status}</span></div>
-      <div class="stats">
-        <div><div class="mute">CPU · ${n.maxcpu || "?"} cœurs</div><div class="t">${cpu.toFixed(0)} %</div>${bar(cpu)}</div>
-        <div><div class="mute">RAM</div><div class="t">${fb(n.mem)} <span class="mute">/ ${fb(n.maxmem)}</span></div>${bar(mem)}</div>
-        <div><div class="mute">Disque système</div><div class="t">${fb(n.disk)} <span class="mute">/ ${fb(n.maxdisk)}</span></div>${bar(disk)}</div>
-      </div>
-      <div style="margin-top:14px"><div class="legend"><span><b style="background:${ORANGE}"></b>CPU</span><span><b style="background:${BLUE}"></b>RAM</span><span class="grow"></span><span>dernière heure</span></div>
-      <canvas data-node="${esc(n.node)}"></canvas></div></div>`;
-  }
+  const cpu = nodes.reduce((a, n) => a + (n.cpu || 0) * (n.maxcpu || 1), 0) / Math.max(1, nodes.reduce((a, n) => a + (n.maxcpu || 1), 0)) * 100;
+  const mem = nodes.reduce((a, n) => a + (n.mem || 0), 0), maxmem = nodes.reduce((a, n) => a + (n.maxmem || 0), 0);
   const st = storage.filter(s => s.status === "available" && s.maxdisk);
-  if (st.length) {
-    h += `<h2>Stockage</h2><div class="card">` + st.map(s => { const p = pct(s.disk, s.maxdisk);
-      return `<div style="margin-bottom:10px"><div class="row"><span class="grow">${esc(s.storage)} <span class="mute">· ${esc(s.node)}</span></span><span class="mute">${fb(s.disk)} / ${fb(s.maxdisk)}</span></div>${bar(p)}</div>`; }).join("") + `</div>`;
+  let h = `<h1 class="large">Serveur</h1>
+    <div class="tiles">
+      <button class="tile" onclick="setView('guests')"><div class="k" style="color:var(--green)">${I.play}Actives</div><div class="n">${run}<small> / ${real.length}</small></div></button>
+      <div class="tile"><div class="k" style="color:var(--orange)">${I.cpu}CPU</div><div class="n">${cpu.toFixed(0)}<small> %</small></div>${bar(cpu)}</div>
+      <div class="tile"><div class="k" style="color:var(--blue)">${I.mem}Mémoire</div><div class="n">${pct(mem, maxmem).toFixed(0)}<small> %</small></div>${bar(pct(mem, maxmem))}</div>
+      <div class="tile"><div class="k" style="color:var(--purple)">${I.disk}Stockage</div><div class="n">${st.length ? pct(st.reduce((a, s) => a + s.disk, 0), st.reduce((a, s) => a + s.maxdisk, 0)).toFixed(0) : "–"}<small> %</small></div>${st.length ? bar(pct(st.reduce((a, s) => a + s.disk, 0), st.reduce((a, s) => a + s.maxdisk, 0))) : ""}</div>
+    </div>`;
+  for (const n of nodes) {
+    const c = (n.cpu || 0) * 100;
+    h += `<div class="hdr"><span class="grow">Nœud ${esc(n.node)}</span></div><div class="group">
+      <div class="cell"><span class="dot ${n.status}"></span><div class="body"><div class="t">${STATUS[n.status] || n.status}</div></div><div class="v">${n.status === "online" ? "depuis " + up(n.uptime) : ""}</div></div>
+      <div class="cell"><div class="body"><div class="row"><span class="grow">Processeur</span><span class="mute">${c.toFixed(0)} % · ${n.maxcpu} cœurs</span></div>${bar(c)}</div></div>
+      <div class="cell"><div class="body"><div class="row"><span class="grow">Mémoire</span><span class="mute">${fb(n.mem)} / ${fb(n.maxmem)}</span></div>${bar(pct(n.mem, n.maxmem))}</div></div>
+      <div class="cell"><div class="body"><div class="row"><span class="grow">Disque système</span><span class="mute">${fb(n.disk)} / ${fb(n.maxdisk)}</span></div>${bar(pct(n.disk, n.maxdisk))}</div></div>
+      <div class="chartbox">${legend([["--orange", "CPU"], ["--blue", "Mémoire"]])}<canvas data-node="${esc(n.node)}"></canvas></div>
+    </div>`;
   }
+  if (st.length) h += `<div class="hdr">Stockage</div><div class="group">` + st.map(s =>
+    `<div class="cell"><div class="body"><div class="row"><span class="grow">${esc(s.storage)}${nodes.length > 1 ? ` <span class="mute">· ${esc(s.node)}</span>` : ""}</span><span class="mute">${fb(s.disk)} / ${fb(s.maxdisk)}</span></div>${bar(pct(s.disk, s.maxdisk))}</div></div>`).join("") + `</div>`;
   $("#v-dash").innerHTML = h;
   loadNodeCharts();
 }
-
 let nodeRrdAt = 0, nodeRrd = {};
-async function loadNodeCharts(force) {
+async function loadNodeCharts() {
   const draw = () => document.querySelectorAll("canvas[data-node]").forEach(cv => chart(cv, nodeRrd[cv.dataset.node] || [], [cpuS, memS], { max: 100 }));
   draw();
-  if (!force && Date.now() - nodeRrdAt < 60000) return;
+  if (Date.now() - nodeRrdAt < 60000) return;
   nodeRrdAt = Date.now();
   await Promise.all(S.ov.nodes.map(async n => { try { nodeRrd[n.node] = (await api("/api/rrd?" + qs({ node: n.node }))).data; } catch {} }));
   draw();
 }
 
-const FILTERS = [["all", "Tout"], ["running", "En marche"], ["stopped", "Arrêtées"], ["qemu", "VM"], ["lxc", "Conteneurs"]];
+// ---------- machines
+const FILTERS = [["all", "Toutes"], ["running", "Actives"], ["stopped", "Arrêtées"]];
 function renderGuests() {
-  $("#filters").innerHTML = FILTERS.map(([k, l]) => `<button class="chip ${S.filter === k ? "on" : ""}" data-f="${k}">${l}</button>`).join("");
+  $("#filters").innerHTML = FILTERS.map(([k, l]) => `<button class="${S.filter === k ? "on" : ""}" data-f="${k}">${l}</button>`).join("");
   const q = $("#search").value.trim().toLowerCase();
-  const list = S.ov.guests.filter(g => {
-    if (S.filter === "running" || S.filter === "stopped") { if (g.status !== S.filter) return false; }
-    else if (S.filter !== "all" && g.type !== S.filter) return false;
-    return !q || String(g.vmid).includes(q) || (g.name || "").toLowerCase().includes(q);
-  }).sort((a, b) => (b.status === "running") - (a.status === "running") || a.vmid - b.vmid);
+  const list = S.ov.guests.filter(g => (S.filter === "all" || g.status === S.filter) &&
+    (!q || String(g.vmid).includes(q) || (g.name || "").toLowerCase().includes(q)))
+    .sort((a, b) => (b.status === "running") - (a.status === "running") || a.vmid - b.vmid);
   $("#guestList").innerHTML = list.length ? list.map(g => {
-    const on = g.status === "running", cpu = (g.cpu || 0) * 100, mem = pct(g.mem, g.maxmem);
-    return `<button class="item" style="width:100%;text-align:left" data-id="${esc(g.id)}">
-      <span class="dot ${g.status}"></span>
-      <div class="grow"><div class="row"><span class="t ell">${esc(g.name || "sans nom")}</span><span class="tag">${kind(g.type)} ${g.vmid}</span>${g.template ? '<span class="tag">modèle</span>' : ""}</div>
-      <div class="mute">${on ? `CPU ${cpu.toFixed(0)} % · RAM ${fb(g.mem)} / ${fb(g.maxmem)}` : STATUS[g.status] || g.status}${S.ov.nodes.length > 1 ? " · " + esc(g.node) : ""}</div>
-      ${on ? bar(mem) : ""}</div></button>`;
+    const on = g.status === "running";
+    return `<button class="cell icon tap" data-id="${esc(g.id)}">${icoBox(g.type === "qemu" ? I.vm : I.ct, g.type === "qemu" ? "indigo" : "teal")}
+      <div class="body"><div class="row" style="gap:8px"><span class="t ell">${esc(g.name || "sans nom")}</span>${g.template ? '<span class="pill">modèle</span>' : ""}</div>
+      <div class="s ell">${kind(g.type)} ${g.vmid} · ${on ? `CPU ${((g.cpu || 0) * 100).toFixed(0)} % · RAM ${fb(g.mem)}` : STATUS[g.status] || g.status}</div></div>
+      <span class="dot ${g.status}"></span>${I.chev}</button>`;
   }).join("") : `<div class="empty">Aucune machine</div>`;
 }
 $("#filters").onclick = e => { const f = e.target.dataset.f; if (f) { S.filter = f; renderGuests(); } };
-$("#search").oninput = renderGuests;
+$("#search").oninput = () => renderGuests();
 $("#guestList").onclick = e => { const it = e.target.closest("[data-id]"); if (it) openGuest(it.dataset.id); };
 
 // ---------- détail machine
 const findGuest = id => S.ov?.guests.find(g => g.id === id);
-let guestRrd = [];
+let guestRrd = [], guestSnaps = null, guestBk = null;
 function openGuest(id) {
-  S.guest = id; guestRrd = [];
-  $("#sheet").classList.add("open"); history.pushState({ g: id }, "");
+  S.guest = id; guestRrd = []; guestSnaps = guestBk = null;
+  $("#sheet").scrollTop = 0; $("#sheet").classList.add("open"); history.pushState({ g: id }, "");
   renderGuest(); loadGuestExtras();
 }
 function closeGuest() { S.guest = null; $("#sheet").classList.remove("open"); }
@@ -306,222 +485,343 @@ addEventListener("popstate", () => { if (S.guest) closeGuest(); });
 function renderGuest() {
   const g = findGuest(S.guest); if (!g) return;
   const on = g.status === "running", cpu = (g.cpu || 0) * 100;
-  const keepSnaps = $("#snaps")?.innerHTML, keepBk = $("#bks")?.innerHTML;
-  $("#sheet").innerHTML = `<header><button class="back" onclick="history.back()">‹ Machines</button></header><main>
-    <div class="row" style="margin:4px 0 14px"><span class="dot ${g.status}"></span><div class="grow"><div class="t ell" style="font-size:20px">${esc(g.name || "sans nom")}</div>
-      <div class="mute">${kind(g.type)} ${g.vmid} · ${esc(g.node)} · ${STATUS[g.status] || g.status}${on ? " depuis " + up(g.uptime) : ""}</div></div></div>
-    <div class="btns">
-      <button class="btn pri" data-p="start" ${on ? "disabled" : ""}>Démarrer</button>
-      <button class="btn" data-p="shutdown" ${on ? "" : "disabled"}>Éteindre</button>
-      <button class="btn" data-p="reboot" ${on ? "" : "disabled"}>Redémarrer</button>
-      <button class="btn danger" data-p="stop" ${on ? "" : "disabled"}>Forcer</button>
+  const sc = $("#sheet").scrollTop;
+  $("#sheet").innerHTML = `<div class="navbar ${sc > 30 ? "scrolled" : ""}" id="gnav"><div class="nt">${esc(g.name || g.vmid)}</div>
+      <div class="side"><button class="navbtn" onclick="history.back()">${I.back}Machines</button></div></div>
+    <h1 class="large ell">${esc(g.name || "sans nom")}</h1>
+    <div class="sub mute row" style="gap:8px"><span class="dot ${g.status}"></span>${kind(g.type)} ${g.vmid} · ${STATUS[g.status] || g.status}${on ? " depuis " + up(g.uptime) : ""}</div>
+    <div class="actions">
+      <button class="go" data-p="start" ${on ? "disabled" : ""}>${I.play}<span style="color:var(--label)">Démarrer</span></button>
+      <button class="pw" data-p="shutdown" ${on ? "" : "disabled"}>${I.power}<span style="color:var(--label)">Éteindre</span></button>
+      <button class="rb" data-p="reboot" ${on ? "" : "disabled"}>${I.reboot}<span style="color:var(--label)">Redémarrer</span></button>
+      <button class="kill" data-p="stop" ${on ? "" : "disabled"}>${I.kill}<span style="color:var(--label)">Forcer</span></button>
     </div>
-    <div class="card" style="margin-top:12px"><div class="stats" style="margin-top:0">
-      <div><div class="mute">CPU · ${g.maxcpu} cœur${g.maxcpu > 1 ? "s" : ""}</div><div class="t">${on ? cpu.toFixed(0) + " %" : "—"}</div>${bar(on ? cpu : 0)}</div>
-      <div><div class="mute">RAM</div><div class="t">${on ? fb(g.mem) : "—"} <span class="mute">/ ${fb(g.maxmem)}</span></div>${bar(on ? pct(g.mem, g.maxmem) : 0)}</div>
-      <div><div class="mute">Disque</div><div class="t">${g.disk ? fb(g.disk) : "—"} <span class="mute">/ ${fb(g.maxdisk)}</span></div>${bar(pct(g.disk, g.maxdisk))}</div>
-      <div><div class="mute">Réseau total</div><div class="t">↓ ${fb(g.netin)} · ↑ ${fb(g.netout)}</div></div>
-    </div></div>
-    <div class="card"><div class="legend"><span><b style="background:${ORANGE}"></b>CPU</span><span><b style="background:${BLUE}"></b>RAM</span><span class="grow"></span><span>dernière heure</span></div><canvas id="cvUse"></canvas>
-      <div class="legend" style="margin-top:12px"><span><b style="background:${GREEN}"></b>Entrant</span><span><b style="background:${ORANGE}"></b>Sortant</span></div><canvas id="cvNet"></canvas></div>
-    <button class="btn" style="width:100%" id="askHermes">💬 Demander à Hermes</button>
-    <h2 class="row"><span class="grow">Snapshots</span><button class="btn sm pri" id="newSnap">+ Snapshot</button></h2>
-    <div class="card list" id="snaps">${keepSnaps || '<div class="item mute">Chargement…</div>'}</div>
-    <h2 class="row"><span class="grow">Sauvegardes</span><button class="btn sm pri" id="newBk">Sauvegarder</button></h2>
-    <div class="card list" id="bks">${keepBk || '<div class="item mute">Chargement…</div>'}</div>
-  </main>`;
+    <div class="hdr">Ressources</div><div class="group">
+      <div class="cell icon">${icoBox(I.cpu, "orange")}<div class="body"><div class="row"><span class="grow">Processeur</span><span class="mute">${on ? cpu.toFixed(0) + " %" : "–"} · ${g.maxcpu} cœur${g.maxcpu > 1 ? "s" : ""}</span></div>${bar(on ? cpu : 0)}</div></div>
+      <div class="cell icon">${icoBox(I.mem, "blue")}<div class="body"><div class="row"><span class="grow">Mémoire</span><span class="mute">${on ? fb(g.mem) : "–"} / ${fb(g.maxmem)}</span></div>${bar(on ? pct(g.mem, g.maxmem) : 0)}</div></div>
+      <div class="cell icon">${icoBox(I.disk, "purple")}<div class="body"><div class="row"><span class="grow">Disque</span><span class="mute">${g.disk ? fb(g.disk) : "–"} / ${fb(g.maxdisk)}</span></div>${bar(pct(g.disk, g.maxdisk))}</div></div>
+      <div class="cell icon">${icoBox(I.net, "green")}<div class="body"><div class="row"><span class="grow">Réseau</span><span class="mute">↓ ${fb(g.netin)} · ↑ ${fb(g.netout)}</span></div></div></div>
+    </div>
+    <div class="hdr">Activité</div><div class="group">
+      <div class="chartbox">${legend([["--orange", "CPU"], ["--blue", "Mémoire"]])}<canvas id="cvUse"></canvas></div>
+      <div class="chartbox" style="padding-top:0">${legend([["--green", "Entrant"], ["--orange", "Sortant"]], "")}<canvas id="cvNet"></canvas></div>
+    </div>
+    <div class="hdr" style="margin-top:22px"></div><div class="group">
+      ${S.ov.exec ? `<button class="cell icon tap" id="gExec">${icoBox(I.term, "gray")}<div class="body t">Lancer une commande</div>${I.chev}</button>` : ""}
+      ${S.ov.hermes ? `<button class="cell icon tap" id="gAsk">${icoBox(I.chat, "blue")}<div class="body t">Demander à Hermes</div>${I.chev}</button>` : ""}
+    </div>
+    <div class="hdr">Snapshots</div><div class="group" id="snaps">${snapsHtml()}</div>
+    <div class="hdr">Sauvegardes</div><div class="group" id="bks">${bksHtml()}</div>
+    <div style="height:calc(40px + env(safe-area-inset-bottom))"></div>`;
+  $("#sheet").scrollTop = sc;
   drawGuestCharts();
-  $("#askHermes").onclick = () => { history.back(); setView("chat"); $("#prompt").value = `Analyse l'état de ${kind(g.type) === "VM" ? "la VM" : "du conteneur"} ${g.vmid} (${g.name}). Tout va bien ?`; $("#prompt").focus(); };
-  $("#newSnap").onclick = () => newSnapshot(g);
-  $("#newBk").onclick = () => newBackup(g);
+  $("#gAsk") && ($("#gAsk").onclick = () => { history.back(); setView("chat"); $("#prompt").value = `Analyse ${g.type === "qemu" ? "la VM" : "le conteneur"} ${g.vmid} (${g.name}). Tout va bien ?`; $("#prompt").focus(); });
+  $("#gExec") && ($("#gExec").onclick = () => { history.back(); S.execTarget = JSON.stringify({ type: g.type, node: g.node, vmid: g.vmid }); setView("exec"); $("#cmd")?.focus(); });
+}
+$("#sheet").addEventListener("scroll", () => $("#gnav")?.classList.toggle("scrolled", $("#sheet").scrollTop > 30), { passive: true });
+function snapsHtml() {
+  const add = `<button class="cell icon tap act" data-new="snap">${icoBox(I.snap, "blue")}<div class="body">Créer un snapshot</div></button>`;
+  if (!guestSnaps) return `<div class="cell"><div class="body mute">Chargement…</div></div>`;
+  if (guestSnaps.error) return `<div class="cell"><div class="body mute">${esc(guestSnaps.error)}</div></div>`;
+  return guestSnaps.map(s => `<button class="cell tap" data-snap="${esc(s.name)}"><div class="body"><div class="t ell">${esc(s.name)}</div>
+    <div class="s ell">${s.snaptime ? when(s.snaptime) : ""}${s.description ? " · " + esc(s.description.trim()) : ""}</div></div>${I.chev}</button>`).join("") + add;
+}
+function bksHtml() {
+  if (!guestBk) return `<div class="cell"><div class="body mute">Chargement…</div></div>`;
+  if (guestBk.error) return `<div class="cell"><div class="body mute">${esc(guestBk.error)}</div></div>`;
+  const add = guestBk.storages.length ? `<button class="cell icon tap act" data-new="backup">${icoBox(I.backup, "green")}<div class="body">Sauvegarder maintenant</div></button>`
+    : `<div class="cell"><div class="body mute">Aucun stockage de sauvegarde sur ce nœud</div></div>`;
+  return guestBk.items.slice(0, 15).map(b => `<button class="cell tap" data-vol="${esc(b.volid)}"><div class="body"><div class="t">${when(b.ctime)}${b.protected ? " 🔒" : ""}</div>
+    <div class="s ell">${esc(b.storage)} · ${fb(b.size)}${b.notes ? " · " + esc(b.notes) : ""}</div></div>${I.chev}</button>`).join("") + add;
 }
 function drawGuestCharts() {
-  const a = $("#cvUse"), b = $("#cvNet"); if (!a) return;
-  chart(a, guestRrd, [cpuS, memS], { max: 100 });
-  chart(b, guestRrd, [{ color: GREEN, v: r => r.netin }, { color: ORANGE, v: r => r.netout }], { fmt: netFmt });
+  chart($("#cvUse"), guestRrd, [cpuS, memS], { max: 100 });
+  chart($("#cvNet"), guestRrd, [{ color: "--green", v: r => r.netin }, { color: "--orange", v: r => r.netout }], { fmt: v => fb(v) + "/s" });
 }
-$("#sheet").addEventListener("click", async e => {
-  const p = e.target.closest("[data-p]")?.dataset.p; if (!p) return;
-  const g = findGuest(S.guest); await runAction({ action: p, node: g.node, type: g.type, vmid: g.vmid });
-});
-
 async function loadGuestExtras() {
   const g = findGuest(S.guest); if (!g) return;
   const a = { node: g.node, type: g.type, vmid: g.vmid };
   api("/api/rrd?" + qs(a)).then(r => { guestRrd = r.data; drawGuestCharts(); }).catch(() => {});
-  api("/api/snapshots?" + qs(a)).then(r => {
-    if (!$("#snaps")) return;
-    $("#snaps").innerHTML = r.items.length ? r.items.map(s => `<div class="item"><div class="grow"><div class="t ell">${esc(s.name)}</div>
-      <div class="mute ell">${s.snaptime ? new Date(s.snaptime * 1000).toLocaleString("fr-FR") : ""}${s.description ? " · " + esc(s.description.trim()) : ""}</div></div>
-      <button class="btn sm" data-snap="${esc(s.name)}" data-do="rollback">Restaurer</button><button class="btn sm danger" data-snap="${esc(s.name)}" data-do="del">✕</button></div>`).join("")
-      : '<div class="item mute">Aucun snapshot</div>';
-  }).catch(e => { if ($("#snaps")) $("#snaps").innerHTML = `<div class="item mute">${esc(e.message)}</div>`; });
-  api("/api/backups?" + qs(a)).then(r => {
-    if (!$("#bks")) return;
-    $("#bks").dataset.storages = JSON.stringify(r.storages);
-    $("#bks").innerHTML = r.items.length ? r.items.map(b => `<div class="item"><div class="grow"><div class="t">${new Date(b.ctime * 1000).toLocaleString("fr-FR")}</div>
-      <div class="mute ell">${esc(b.storage)} · ${fb(b.size)}${b.notes ? " · " + esc(b.notes) : ""}${b.protected ? " · 🔒" : ""}</div></div>
-      <button class="btn sm" data-vol="${esc(b.volid)}">Restaurer</button></div>`).join("")
-      : `<div class="item mute">${r.storages.length ? "Aucune sauvegarde" : "Aucun stockage de sauvegarde sur ce nœud"}</div>`;
-  }).catch(e => { if ($("#bks")) $("#bks").innerHTML = `<div class="item mute">${esc(e.message)}</div>`; });
+  api("/api/snapshots?" + qs(a)).then(r => { guestSnaps = r.items; }).catch(e => { guestSnaps = { error: e.message }; })
+    .finally(() => { if ($("#snaps")) $("#snaps").innerHTML = snapsHtml(); });
+  api("/api/backups?" + qs(a)).then(r => { guestBk = r; }).catch(e => { guestBk = { error: e.message }; })
+    .finally(() => { if ($("#bks")) $("#bks").innerHTML = bksHtml(); });
 }
 $("#sheet").addEventListener("click", async e => {
   const g = findGuest(S.guest); if (!g) return;
-  const sb = e.target.closest("[data-snap]"), vb = e.target.closest("[data-vol]");
-  if (sb) await runAction({ action: sb.dataset.do === "del" ? "snapdelete" : "rollback", node: g.node, type: g.type, vmid: g.vmid, name: sb.dataset.snap });
-  if (vb) await runAction({ action: "restore", node: g.node, type: g.type, vmid: g.vmid, volid: vb.dataset.vol });
+  const base = { node: g.node, type: g.type, vmid: g.vmid };
+  const p = e.target.closest("[data-p]"), sn = e.target.closest("[data-snap]"), vb = e.target.closest("[data-vol]"), nw = e.target.closest("[data-new]");
+  if (p) return runAction({ ...base, action: p.dataset.p });
+  if (sn) {
+    const i = await actionSheet(esc(sn.dataset.snap), "", [{ label: "Revenir à ce snapshot" }, { label: "Supprimer le snapshot", danger: true }]);
+    if (i >= 0) runAction({ ...base, action: i === 0 ? "rollback" : "snapdelete", name: sn.dataset.snap });
+  }
+  if (vb) { if (await actionSheet("Sauvegarde", "", [{ label: "Restaurer sur cette machine", danger: true }]) === 0) runAction({ ...base, action: "restore", volid: vb.dataset.vol }); }
+  if (nw?.dataset.new === "snap") {
+    const def = "pvehub-" + new Date().toISOString().slice(0, 16).replace(/[-:]/g, "").replace("T", "-");
+    const v = await alertForm("Nouveau snapshot", esc(g.name), [{ name: "name", ph: "Nom", value: def }, { name: "description", ph: "Description (facultatif)" }]);
+    if (v) runAction({ ...base, action: "snapshot", ...v }, true);
+  }
+  if (nw?.dataset.new === "backup") {
+    const v = await alertForm("Sauvegarder maintenant", esc(g.name), [{ name: "storage", ph: "Stockage", options: guestBk.storages }, { name: "mode", ph: "Mode", options: ["snapshot", "suspend", "stop"] }]);
+    if (v) runAction({ ...base, action: "backup", ...v }, true);
+  }
 });
 
-async function newSnapshot(g) {
-  const d = new Date(), def = "pvehub-" + d.toISOString().slice(0, 16).replace(/[-:T]/g, "").replace(/^(\d{8})/, "$1-");
-  const v = await promptBox(`Nouveau snapshot de <b>${esc(g.name)}</b>`, [{ name: "name", ph: "Nom", value: def }, { name: "description", ph: "Description (facultatif)" }]);
-  if (v) await runAction({ action: "snapshot", node: g.node, type: g.type, vmid: g.vmid, ...v }, true);
-}
-async function newBackup(g) {
-  let stores = []; try { stores = JSON.parse($("#bks").dataset.storages || "[]"); } catch {}
-  if (!stores.length) return toast("Aucun stockage de sauvegarde disponible");
-  const v = await promptBox(`Sauvegarder <b>${esc(g.name)}</b> maintenant`, [{ name: "storage", options: stores }, { name: "mode", options: ["snapshot", "suspend", "stop"] }]);
-  if (v) await runAction({ action: "backup", node: g.node, type: g.type, vmid: g.vmid, ...v }, true);
-}
-
-// ---------- actions (communes aux boutons et à Hermes)
+// ---------- actions (boutons + Hermes)
 const ACT = {
   start:     { label: "Démarrer", run: a => api("/api/power", { body: { ...a, action: "start" } }) },
   shutdown:  { label: "Éteindre", run: a => api("/api/power", { body: { ...a, action: "shutdown" } }) },
   reboot:    { label: "Redémarrer", run: a => api("/api/power", { body: { ...a, action: "reboot" } }) },
   stop:      { label: "Forcer l'arrêt de", danger: true, warn: "Équivaut à débrancher la prise : risque de perte de données.", run: a => api("/api/power", { body: { ...a, action: "stop" } }) },
   snapshot:  { label: "Snapshot de", run: a => api("/api/snapshot", { body: a }) },
-  rollback:  { label: "Revenir au snapshot", danger: true, warn: "L'état actuel sera perdu.", run: a => api("/api/snapshot/rollback", { body: a }) },
+  rollback:  { label: "Revenir au snapshot", danger: true, warn: "L'état actuel de la machine sera perdu.", run: a => api("/api/snapshot/rollback", { body: a }) },
   snapdelete:{ label: "Supprimer le snapshot", danger: true, run: a => api("/api/snapshot/delete", { body: a }) },
   backup:    { label: "Sauvegarder", run: a => api("/api/backup", { body: a }) },
-  restore:   { label: "Restaurer la sauvegarde sur", danger: true, warn: "La machine sera écrasée par la sauvegarde. Elle doit être arrêtée.", run: a => api("/api/restore", { body: a }) },
+  restore:   { label: "Restaurer la sauvegarde sur", danger: true, warn: "La machine sera écrasée. Elle doit être arrêtée.", run: a => api("/api/restore", { body: a }) },
 };
+// Actions que l'utilisateur peut pré-autoriser pour Hermes (jamais les destructrices)
+const AUTO_OK = [["start", "Démarrer une machine"], ["shutdown", "Éteindre une machine"], ["reboot", "Redémarrer une machine"], ["snapshot", "Créer un snapshot"], ["backup", "Lancer une sauvegarde"]];
 function describe(a) {
   const d = ACT[a.action], g = S.ov?.guests.find(x => x.vmid == a.vmid);
-  const who = `${kind(a.type)} ${a.vmid}${g?.name ? " « " + g.name + " »" : ""}`;
-  return `${d?.label || a.action} ${who}${a.name && a.action !== "snapshot" ? " (" + a.name + ")" : a.name ? " « " + a.name + " »" : ""}`;
+  const who = `${kind(a.type || g?.type)} ${a.vmid}${g?.name ? " « " + g.name + " »" : ""}`;
+  return `${d?.label || a.action} ${who}${a.name ? (a.action === "snapshot" ? " « " + a.name + " »" : " (" + a.name + ")") : ""}`;
 }
-// Retourne le résultat texte (pour l'historique Hermes) ou null si annulé.
 async function runAction(a, skipConfirm) {
   const d = ACT[a.action]; if (!d) { toast("Action inconnue : " + a.action); return null; }
   const g = S.ov?.guests.find(x => x.vmid == a.vmid);
   a = { node: g?.node, type: g?.type, ...a };
   if (!a.node || !a.type) { toast("Machine introuvable : " + a.vmid); return null; }
   const text = describe(a);
-  if (!skipConfirm && !await confirmBox(`<b>${esc(text)}</b> ?${d.warn ? `<br><span class="mute">${esc(d.warn)}</span>` : ""}`, "Confirmer", d.danger)) return null;
+  if (!skipConfirm && !await confirmBox(esc(text) + " ?", d.warn ? esc(d.warn) : "", d.danger ? "Confirmer" : d.label, d.danger)) return null;
   try { return await track(await d.run(a), text); }
   catch (e) { toast("❌ " + e.message); return e.message; }
 }
 
+// ---------- commandes
+const PRESETS = ["uptime", "df -h", "free -h", "top -bn1 | head -15", "ip -br a", "systemctl --failed", "apt list --upgradable 2>/dev/null", "docker ps"];
+S.execLog = store.get("pvehub.exec", []);
+function renderExec() {
+  const el = $("#v-exec");
+  if (!S.ov.exec) {
+    el.innerHTML = `<h1 class="large">Commandes</h1><div class="group"><div class="cell"><div class="body">
+      <div class="t">Pas encore activé</div><div class="s" style="line-height:1.4">Les commandes passent par une clé SSH vers l'hôte Proxmox. Relance l'installeur en mode mise à jour et réponds « o » à la question sur les commandes.</div></div></div></div>`;
+    return;
+  }
+  if (el.dataset.ready && !$("#target")?.matches(":focus")) { fillTargets(); return; }
+  if (el.dataset.ready) return;
+  el.dataset.ready = 1;
+  el.innerHTML = `<h1 class="large">Commandes</h1>
+    <div class="group">
+      <label class="cell"><div class="body">Exécuter sur</div><select id="target" class="picker" aria-label="Cible"></select>${I.chev}</label>
+      <textarea id="cmd" class="term" placeholder="ex. df -h" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Commande"></textarea>
+    </div>
+    <button class="bigbtn" id="runCmd">Exécuter</button>
+    <div class="hdr">Raccourcis</div>
+    <div class="chips">${PRESETS.map(p => `<button class="chip" data-pre="${esc(p)}">${esc(p)}</button>`).join("")}</div>
+    <div class="ftr">Sur l'hôte, en root. Dans une VM, l'agent QEMU doit être installé. 60 s maximum par commande.</div>
+    <div id="execLog"></div>`;
+  fillTargets(); renderExecLog();
+  $("#runCmd").onclick = runExec;
+  $("#cmd").addEventListener("keydown", e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) runExec(); });
+  el.querySelector(".chips").onclick = e => { const p = e.target.dataset.pre; if (p) { $("#cmd").value = p; runExec(); } };
+  $("#target").onchange = e => { S.execTarget = e.target.value; };
+}
+function fillTargets() {
+  const sel = $("#target"); if (!sel) return;
+  const host = S.ov.nodes[0]?.node || "hôte";
+  const opts = [[JSON.stringify({ type: "host" }), `Hôte ${host}`]].concat(
+    S.ov.guests.filter(g => g.status === "running" && !g.template).sort((a, b) => a.vmid - b.vmid)
+      .map(g => [JSON.stringify({ type: g.type, node: g.node, vmid: g.vmid }), `${kind(g.type)} ${g.vmid} · ${g.name || ""}`]));
+  const cur = S.execTarget || opts[0][0];
+  sel.innerHTML = opts.map(([v, l]) => `<option value="${esc(v)}" ${v === cur ? "selected" : ""}>${esc(l)}</option>`).join("");
+  if (sel.value !== cur) S.execTarget = sel.value;
+}
+async function runExec() {
+  const command = $("#cmd").value.trim(); if (!command || S.execBusy) return;
+  const t = JSON.parse($("#target").value), label = $("#target").selectedOptions[0].textContent;
+  S.execBusy = true; $("#runCmd").disabled = true; $("#runCmd").textContent = "Exécution…";
+  const entry = { command, label, at: Date.now() };
+  try { Object.assign(entry, await api("/api/exec", { body: { ...t, command } })); }
+  catch (e) { entry.code = -1; entry.output = e.message; }
+  S.execBusy = false; $("#runCmd").disabled = false; $("#runCmd").textContent = "Exécuter";
+  entry.output = (entry.output || "").slice(-8000);
+  S.execLog.unshift(entry); S.execLog = S.execLog.slice(0, 15); store.set("pvehub.exec", S.execLog);
+  renderExecLog();
+}
+function renderExecLog() {
+  const el = $("#execLog"); if (!el) return;
+  el.innerHTML = S.execLog.length ? `<div class="hdr"><span class="grow">Résultats</span><button id="clearExec">Effacer</button></div>` + S.execLog.map(r => `
+    <div class="group" style="margin-bottom:12px"><div class="cell"><div class="body"><div class="t ell" style="font-family:var(--mono);font-size:15px">$ ${esc(r.command)}</div>
+      <div class="s">${esc(r.label)} · ${new Date(r.at).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}${r.ms != null ? ` · ${(r.ms / 1000).toFixed(1).replace(".", ",")} s` : ""}</div></div>
+      <span class="${r.code === 0 ? "code-ok" : "code-bad"}">${r.code === 0 ? "OK" : "code " + r.code}</span></div>
+      <pre class="out">${esc(r.output || "(aucune sortie)")}</pre></div>`).join("") : "";
+  $("#clearExec") && ($("#clearExec").onclick = () => { S.execLog = []; store.set("pvehub.exec", []); renderExecLog(); });
+}
+
+// ---------- autorisations Hermes
+function openPerms() {
+  const auto = store.get("pvehub.auto", {});
+  const m = document.createElement("div"); m.className = "modal";
+  m.innerHTML = `<div class="card-sheet"><div class="grab"></div><div class="shead"><span style="width:60px"></span><h2>Autorisations</h2><button class="navbtn" style="font-weight:600;width:60px;justify-content:flex-end" data-close>OK</button></div>
+    <div class="hdr">Hermes peut, sans demander</div><div class="group">
+    ${AUTO_OK.map(([k, l]) => `<label class="cell"><div class="body">${l}</div><span class="sw"><input type="checkbox" data-k="${k}" ${auto[k] ? "checked" : ""} aria-label="${l}"><span></span></span></label>`).join("")}</div>
+    <div class="ftr">Quand Hermes propose une de ces actions, elle s'exécute tout de suite. Forcer l'arrêt, restaurer et supprimer demandent toujours ta confirmation.</div>
+    <div class="hdr">Ses propres commandes</div><div class="group"><div class="cell icon">${icoBox(I.shield, "orange")}<div class="body"><div class="t">Validation dans la conversation</div>
+      <div class="s" style="line-height:1.35">Quand Hermes veut lancer une commande sensible sur sa machine, une demande apparaît : Autoriser, Pour la session, Toujours ou Refuser.</div></div></div></div>
+    <div class="ftr">« Toujours » est retenu par Hermes lui-même ; pour l'annuler, modifie sa configuration.</div></div>`;
+  m.onchange = e => { const k = e.target.dataset.k; if (k) { const a = store.get("pvehub.auto", {}); a[k] = e.target.checked; store.set("pvehub.auto", a); } };
+  m.onclick = e => { if (e.target === m || e.target.closest("[data-close]")) m.remove(); };
+  document.body.appendChild(m);
+}
+
 // ---------- chat Hermes
 S.chat = store.get("pvehub.chat", []);
-function md(src) {
-  const parts = src.split(/```(\w*)\n?([\s\S]*?)(?:```|$)/g);
+const CHOICE = { once: "Autoriser", session: "Pour la session", always: "Toujours", deny: "Refuser" };
+const actionBlocks = text => [...text.matchAll(/```pvehub\n?([\s\S]*?)```/g)].map(m => m[1].trim());
+function md(m) {
+  const parts = m.content.split(/```(\w*)\n?([\s\S]*?)(?:```|$)/g);
   let out = "";
   for (let i = 0; i < parts.length; i += 3) {
     out += esc(parts[i]).replace(/`([^`\n]+)`/g, "<code>$1</code>").replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>")
       .replace(/^#{1,4} (.+)$/gm, "<b>$1</b>").replace(/^[-*] /gm, "• ").replace(/\n/g, "<br>");
-    if (i + 2 < parts.length) {
-      const lang = parts[i + 1], code = parts[i + 2];
-      if (lang === "pvehub") {
-        try { const a = JSON.parse(code); out += `<div class="act"><span class="grow">⚡ ${esc(describe(a))}</span><button class="btn sm pri" data-act='${esc(JSON.stringify(a))}'>Exécuter</button></div>`; }
-        catch { out += parts[i + 2].trim() ? `<div class="act"><span class="grow mute">Action en cours de rédaction…</span></div>` : ""; }
-      } else out += `<pre>${esc(code)}</pre>`;
-    }
+    if (i + 2 >= parts.length) continue;
+    const lang = parts[i + 1], code = parts[i + 2].trim();
+    if (lang !== "pvehub") { out += `<pre>${esc(code)}</pre>`; continue; }
+    let a; try { a = JSON.parse(code); } catch { out += m.typing ? `<div class="inline"><div class="is">Action en préparation…</div></div>` : ""; continue; }
+    const done = m.done?.[code];
+    out += `<div class="inline"><div class="it">${I.bolt.replace("<svg", '<svg width="16" height="16" style="color:var(--orange)"')}${esc(describe(a))}</div>
+      ${done ? `<div class="done ${done === "OK" ? "" : "no"}">${done === "OK" ? "✓ Fait" : "✕ " + esc(done)}</div>`
+        : m.typing ? "" : `<div class="ibtns"><button class="ibtn pri" data-act="${esc(code)}">Exécuter</button></div>`}</div>`;
   }
   return out;
 }
-function msgHtml(m) {
+function approvalsHtml(m) {
+  return (m.approvals || []).map((ap, i) => `<div class="inline"><div class="it">${I.shield.replace("<svg", '<svg width="16" height="16" style="color:var(--orange)"')}Hermes demande l'autorisation</div>
+    ${ap.description ? `<div class="is">${esc(ap.description)}</div>` : ""}${ap.command ? `<pre>${esc(ap.command)}</pre>` : ""}
+    ${ap.answer ? `<div class="done ${ap.answer === "deny" ? "no" : ""}">${ap.answer === "deny" ? "✕ Refusé" : "✓ " + esc(CHOICE[ap.answer] || ap.answer)}</div>`
+      : m.typing ? `<div class="ibtns">${(ap.choices || ["once", "deny"]).map(c => `<button class="ibtn ${c === "once" ? "pri" : c === "deny" ? "no" : ""}" data-ap="${i}" data-choice="${c}">${CHOICE[c] || c}</button>`).join("")}</div>`
+      : `<div class="done no">Demande expirée</div>`}</div>`).join("");
+}
+function msgHtml(m, idx) {
   if (m.role === "note") return `<div class="msg note">${esc(m.content)}</div>`;
-  const tools = m.tools?.length ? `<div class="tools">${m.tools.map(t => `<span>🔧 ${esc(t)}</span>`).join("")}</div>` : "";
-  return `<div class="msg ${m.role}">${tools}${m.role === "user" ? esc(m.content).replace(/\n/g, "<br>") : md(m.content)}${m.typing ? '<span class="typing"></span>' : ""}</div>`;
+  if (m.role === "user") return `<div class="msg user">${esc(m.content).replace(/\n/g, "<br>")}</div>`;
+  const tools = m.tools?.length ? `<div class="tools">${m.tools.map(t => `<span>${I.wrench}${esc(t)}</span>`).join("")}</div>` : "";
+  const body = m.content ? md(m) : m.typing ? "" : "<span class='mute'>(réponse vide)</span>";
+  return `<div class="msg assistant" data-idx="${idx}">${tools}${body}${approvalsHtml(m)}${m.typing && !m.content ? '<span class="typing"><i></i><i></i><i></i></span>' : ""}</div>`;
 }
 function renderChat() {
-  if (!S.ov?.hermes) { $("#chat").innerHTML = `<div class="empty">Hermes n'est pas configuré.<br>Renseigne HERMES_URL et HERMES_KEY dans le fichier .env.</div>`; $("#composer").classList.add("hide"); return; }
+  if (!S.ov?.hermes) { $("#chat").innerHTML = `<div class="empty">Hermes n'est pas configuré.<br>Renseigne HERMES_URL et HERMES_KEY dans /opt/pvehub/.env.</div>`; $("#composer").classList.add("hide"); return; }
   $("#composer").classList.remove("hide");
-  $("#chat").innerHTML = S.chat.length ? S.chat.map(msgHtml).join("") + (S.chat.length ? `<button class="chip" style="align-self:center" id="clearChat">Nouvelle conversation</button>` : "")
-    : `<div class="empty">Pose une question à Hermes sur ton serveur.<br><br>
-      <button class="chip" data-ex="Comment va mon serveur ?">Comment va mon serveur ?</button><br><br>
-      <button class="chip" data-ex="Quelle machine consomme le plus ?">Quelle machine consomme le plus ?</button></div>`;
+  $("#chat").innerHTML = S.chat.length ? S.chat.map(msgHtml).join("") + `<button class="chip" style="align-self:center;margin-top:16px;font-family:var(--font);color:var(--blue)" id="clearChat">Nouvelle conversation</button>`
+    : `<div class="empty">Demande à Hermes comment va ton serveur, ou ce qu'il ferait.<br><br>
+      <button class="chip" data-ex="Comment va mon serveur ?">Comment va mon serveur ?</button><button class="chip" data-ex="Quelle machine consomme le plus ?">Quelle machine consomme le plus ?</button></div>`;
 }
 const scrollChat = () => requestAnimationFrame(() => scrollTo(0, document.body.scrollHeight));
+const saveChat = () => store.set("pvehub.chat", S.chat.slice(-80));
+function addNote(text) { S.pending.push("[PVE Hub] " + text); S.chat.push({ role: "note", content: text }); }
 $("#chat").onclick = async e => {
-  if (e.target.id === "clearChat") { if (await confirmBox("Effacer la conversation ?")) { S.chat = []; S.pending = []; store.set("pvehub.chat", []); renderChat(); } return; }
+  if (e.target.id === "clearChat") { if (await confirmBox("Nouvelle conversation", "L'historique sur ce téléphone sera effacé.", "Effacer", true)) { S.chat = []; S.pending = []; saveChat(); renderChat(); } return; }
   if (e.target.dataset.ex) { $("#prompt").value = e.target.dataset.ex; return send(); }
+  const ab = e.target.closest("[data-ap]");
+  if (ab) {
+    const m = S.chat[+ab.closest("[data-idx]").dataset.idx], ap = m.approvals[+ab.dataset.ap];
+    ab.parentElement.querySelectorAll("button").forEach(b => b.disabled = true);
+    try { await api("/api/chat/approval", { body: { run_id: m.runId, choice: ab.dataset.choice, request_id: ap.request_id } }); ap.answer = ab.dataset.choice; }
+    catch (err) { toast("❌ " + err.message); ab.parentElement.querySelectorAll("button").forEach(b => b.disabled = false); return; }
+    paintMsg(m); saveChat(); return;
+  }
   const b = e.target.closest("[data-act]"); if (!b) return;
-  let a; try { a = JSON.parse(b.dataset.act); } catch { return; }
+  const m = S.chat[+b.closest("[data-idx]").dataset.idx], code = b.dataset.act;
+  let a; try { a = JSON.parse(code); } catch { return; }
   const res = await runAction(a); if (res === null) return;
-  const note = `[PVE Hub] ${describe(a)} → ${res === "OK" ? "terminé avec succès" : res}`;
-  S.pending.push(note); S.chat.push({ role: "note", content: note.replace("[PVE Hub] ", "") });
-  store.set("pvehub.chat", S.chat); renderChat(); scrollChat();
+  (m.done ||= {})[code] = res; addNote(`${describe(a)} → ${res === "OK" ? "terminé" : res}`);
+  saveChat(); renderChat(); scrollChat();
 };
-$("#prompt").addEventListener("input", e => { e.target.style.height = "42px"; e.target.style.height = Math.min(120, e.target.scrollHeight) + "px"; });
+function paintMsg(m) {
+  const idx = S.chat.indexOf(m), el = document.querySelector(`#chat [data-idx="${idx}"]`);
+  if (el && S.view === "chat") { el.outerHTML = msgHtml(m, idx); if (innerHeight + scrollY > document.body.scrollHeight - 220) scrollChat(); }
+}
+async function autoRun(m) {
+  const auto = store.get("pvehub.auto", {});
+  for (const code of actionBlocks(m.content)) {
+    let a; try { a = JSON.parse(code); } catch { continue; }
+    if (!auto[a.action] || !AUTO_OK.some(([k]) => k === a.action) || m.done?.[code]) continue;
+    (m.done ||= {})[code] = "…"; paintMsg(m);
+    const res = await runAction(a, true);
+    m.done[code] = res ?? "annulé"; addNote(`${describe(a)} → ${res === "OK" ? "fait automatiquement" : res}`);
+    saveChat(); renderChat(); scrollChat();
+  }
+}
+$("#prompt").addEventListener("input", e => { e.target.style.height = "36px"; e.target.style.height = Math.min(120, e.target.scrollHeight) + "px"; });
 $("#prompt").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && !matchMedia("(pointer:coarse)").matches) { e.preventDefault(); send(); } });
 $("#sendBtn").onclick = send;
 
 async function send() {
   const text = $("#prompt").value.trim(); if (!text || S.busy) return;
-  $("#prompt").value = ""; $("#prompt").style.height = "42px";
+  $("#prompt").value = ""; $("#prompt").style.height = "36px";
   const content = (S.pending.length ? S.pending.join("\n") + "\n\n" : "") + text; S.pending = [];
   S.chat.push({ role: "user", content: text, sent: content });
-  const reply = { role: "assistant", content: "", tools: [], typing: true }; S.chat.push(reply);
-  S.busy = true; renderChat(); scrollChat();
-  const history = S.chat.filter(m => m !== reply && (m.role === "user" || m.role === "assistant")).map(m => ({ role: m.role, content: m.sent || m.content }));
+  const reply = { role: "assistant", content: "", tools: [], approvals: [], typing: true }; S.chat.push(reply);
+  S.busy = true; $("#sendBtn").disabled = true; renderChat(); scrollChat();
+  const history = S.chat.filter(m => m !== reply && (m.role === "user" || m.role === "assistant") && (m.content || m.sent))
+    .map(m => ({ role: m.role, content: m.sent || m.content }));
   let last = 0;
-  const paint = force => { if (!force && Date.now() - last < 80) return; last = Date.now();
-    const els = document.querySelectorAll("#chat .msg"); const el = els[els.length - 1];
-    if (el && S.view === "chat") { el.outerHTML = msgHtml(reply); const nearBottom = innerHeight + scrollY > document.body.scrollHeight - 200; if (nearBottom) scrollChat(); } };
+  const paint = force => { if (force || Date.now() - last > 80) { last = Date.now(); paintMsg(reply); } };
   try {
     const r = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin", body: JSON.stringify({ messages: history }) });
     if (r.status === 401) { showLogin(); throw new Error("Non connecté"); }
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
-    const rd = r.body.getReader(), dec = new TextDecoder(); let buf = "";
-    for (;;) {
+    const rd = r.body.getReader(), dec = new TextDecoder(); let buf = "", ended = false;
+    while (!ended) {
       const { value, done } = await rd.read(); if (done) break;
       buf += dec.decode(value, { stream: true }).replace(/\r\n/g, "\n");
       let i;
       while ((i = buf.indexOf("\n\n")) >= 0) {
         const block = buf.slice(0, i); buf = buf.slice(i + 2);
-        let ev = "message", data = "";
-        for (const line of block.split("\n")) {
-          if (line.startsWith(":")) continue;
-          if (line.startsWith("event:")) ev = line.slice(6).trim();
-          else if (line.startsWith("data:")) data += line.slice(5).trimStart();
-        }
-        if (!data || data === "[DONE]") continue;
+        const data = block.split("\n").filter(l => l.startsWith("data:")).map(l => l.slice(5).trimStart()).join("\n");
+        if (!data) continue;
         let j; try { j = JSON.parse(data); } catch { continue; }
-        if (ev === "hermes.tool.progress") {
-          const t = j.tool || j.name || j.tool_name || j.label || "outil";
-          if (!reply.tools.includes(t)) reply.tools.push(t);
-        } else if (j.error) throw new Error(j.error.message || j.error);
-        else reply.content += j.choices?.[0]?.delta?.content || "";
+        switch (j.event) {
+          case "pvehub.run": reply.runId = j.run_id; break;
+          case "message.delta": reply.content += j.delta || ""; break;
+          case "tool.started": if (j.tool && !reply.tools.includes(j.tool)) reply.tools.push(j.tool); break;
+          case "approval.request": reply.approvals.push({ command: j.command, description: j.description, choices: j.choices, request_id: j.request_id }); paint(true); scrollChat(); toast("🛡️ Hermes demande une autorisation"); break;
+          case "approval.responded": { const p = reply.approvals.find(a => !a.answer); if (p) p.answer = j.choice; break; }
+          case "run.completed": if (j.output) reply.content = j.output; ended = true; break;
+          case "run.failed": case "run.interrupted": throw new Error(j.error || "Hermes a échoué");
+          case "run.cancelled": reply.content += (reply.content ? "\n\n" : "") + "_(annulé)_"; ended = true; break;
+        }
         paint();
       }
     }
-    if (!reply.content) reply.content = "_(réponse vide)_";
   } catch (e) {
     reply.content += (reply.content ? "\n\n" : "") + "⚠️ " + e.message;
   }
-  reply.typing = false; S.busy = false; paint(true);
-  store.set("pvehub.chat", S.chat.slice(-80));
+  reply.typing = false; S.busy = false; $("#sendBtn").disabled = false; paint(true); saveChat();
+  autoRun(reply);
 }
 
-// ---------- boucle de rafraîchissement (pause quand l'app est cachée)
+// ---------- rafraîchissement (en pause quand l'app est cachée)
 let timer;
 async function refresh() {
   try {
     S.ov = await api("/api/overview");
-    $("#live").textContent = "● en direct"; $("#live").style.color = "var(--ok)";
+    $("#live")?.classList.remove("off"); $("#live") && ($("#live").lastChild.textContent = "en direct");
     if (S.view !== "chat") render();
     if (S.guest) renderGuest();
   } catch (e) {
-    if (e.message !== "Non connecté") { $("#live").textContent = "● hors ligne"; $("#live").style.color = "var(--bad)"; }
+    if (e.message !== "Non connecté" && $("#live")) { $("#live").classList.add("off"); $("#live").lastChild.textContent = "hors ligne"; }
   }
 }
 function loop() { clearInterval(timer); if (document.visibilityState === "visible") { refresh(); timer = setInterval(refresh, 5000); } }
 document.addEventListener("visibilitychange", loop);
-setInterval(() => { if (document.visibilityState === "visible" && S.view === "dash") loadNodeCharts(); if (S.guest) api("/api/rrd?" + qs((({ node, type, vmid }) => ({ node, type, vmid }))(findGuest(S.guest) || {}))).then(r => { guestRrd = r.data; drawGuestCharts(); }).catch(() => {}); }, 60000);
-addEventListener("resize", () => { loadNodeCharts(); drawGuestCharts(); });
+setInterval(() => {
+  if (document.visibilityState !== "visible") return;
+  if (S.view === "dash" && S.ov) loadNodeCharts();
+  const g = findGuest(S.guest); if (g) api("/api/rrd?" + qs({ node: g.node, type: g.type, vmid: g.vmid })).then(r => { guestRrd = r.data; drawGuestCharts(); }).catch(() => {});
+}, 60000);
+addEventListener("resize", () => { if (S.ov) { loadNodeCharts(); drawGuestCharts(); } });
 
 // ---------- connexion
 function showLogin() { clearInterval(timer); $("#app").classList.add("hide"); $("#login").classList.remove("hide"); }
@@ -533,7 +833,7 @@ $("#loginForm").onsubmit = async e => {
 async function start() {
   try { S.ov = await api("/api/overview"); } catch (e) { if (e.message === "Non connecté") return; }
   $("#login").classList.add("hide"); $("#app").classList.remove("hide");
-  render(); loop();
+  setView(S.view); loop();
 }
 start();
 </script>
