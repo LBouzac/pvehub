@@ -13,8 +13,10 @@ L'app ne rafraîchit les données que lorsqu'elle est ouverte à l'écran.
 
 ## Installation (sur l'hôte Proxmox, en root)
 
+Dans le Shell du nœud (interface web → ton nœud → Shell) :
+
 ```bash
-bash pvehub-install.sh
+bash <(curl -fsSL https://raw.githubusercontent.com/LBouzac/pvehub/main/pvehub-install.sh)
 ```
 
 Le script pose 5 questions (Entrée = valeur par défaut), puis :
@@ -43,7 +45,7 @@ confirmation, puis l'exécute avec son propre jeton.
 ## Mettre à jour
 
 ```bash
-bash pvehub-install.sh update <ID-du-conteneur>
+bash <(curl -fsSL https://raw.githubusercontent.com/LBouzac/pvehub/main/pvehub-install.sh) update <ID-du-conteneur>
 ```
 
 ## Sécurité
