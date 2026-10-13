@@ -184,6 +184,22 @@ canvas{width:100%;height:120px;display:block}
 .sw input:checked+span{background:var(--green)}
 .sw input:checked+span::after{transform:translateX(20px)}
 
+/* mes apps : grille façon écran d'accueil */
+.appgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(76px,1fr));gap:18px 8px;margin:4px 16px 0}
+.app{display:flex;flex-direction:column;align-items:center;gap:6px;text-decoration:none;color:var(--label);position:relative;min-width:0}
+.app .ai{width:62px;height:62px;border-radius:15px;display:grid;place-items:center;position:relative;overflow:hidden;color:#fff;font-size:26px;font-weight:600;
+  box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.app .ai img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;padding:11px;background:var(--card)}
+.app .an{font-size:12px;text-align:center;width:100%;line-height:1.2;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.app .st{position:absolute;top:-3px;right:calc(50% - 37px);width:13px;height:13px;border-radius:50%;border:2.5px solid var(--bg);background:var(--gray)}
+.app .st.up{background:var(--green)}.app .st.down{background:var(--red)}
+.app.hid{opacity:.4}
+.app.add .ai{background:var(--fill);color:var(--accent);box-shadow:none;font-size:34px;font-weight:300}
+.appgrid.edit .app:not(.add) .ai{animation:wiggle .3s ease-in-out infinite alternate}
+.appgrid.edit .app:nth-child(even) .ai{animation-delay:-.15s}
+@keyframes wiggle{from{transform:rotate(-1.5deg)}to{transform:rotate(1.5deg)}}
+@media (prefers-reduced-motion:reduce){.appgrid.edit .app .ai{animation:none}}
+
 /* réglages d'apparence */
 .swatches{display:grid;grid-template-columns:repeat(auto-fill,minmax(44px,1fr));gap:10px;padding:14px 16px}
 .swatch{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;justify-self:center;border:3px solid transparent}
@@ -282,6 +298,7 @@ canvas{width:100%;height:120px;display:block}
       <div class="seg" id="filters"></div>
       <div class="group" id="guestList"></div>
     </section>
+    <section id="v-apps" class="hide"></section>
     <section id="v-exec" class="hide"></section>
     <section id="v-chat" class="hide">
       <h1 class="large">Hermes</h1>
@@ -294,7 +311,8 @@ canvas{width:100%;height:120px;display:block}
   </main>
   <nav class="tabbar">
     <button data-v="dash" class="on"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 4.5A1.5 1.5 0 0 1 5.5 3h13A1.5 1.5 0 0 1 20 4.5v4A1.5 1.5 0 0 1 18.5 10h-13A1.5 1.5 0 0 1 4 8.5zm0 11A1.5 1.5 0 0 1 5.5 14h13a1.5 1.5 0 0 1 1.5 1.5v4a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 19.5zM7 7.5a1 1 0 1 0 0-2 1 1 0 0 0 0 2m0 11a1 1 0 1 0 0-2 1 1 0 0 0 0 2"/></svg>Serveur</button>
-    <button data-v="guests"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg>Machines</button>
+    <button data-v="guests"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.2 20.5 7v10L12 21.8 3.5 17V7zm0 2.3L6 7.9l6 3.4 6-3.4zM5.5 9.6v6.2l5.5 3.1v-6.2zm13 0L13 12.7v6.2l5.5-3.1z"/></svg>Machines</button>
+    <button data-v="apps"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="8" height="8" rx="2.5"/><rect x="13" y="3" width="8" height="8" rx="2.5"/><rect x="3" y="13" width="8" height="8" rx="2.5"/><rect x="13" y="13" width="8" height="8" rx="2.5"/></svg>Apps</button>
     <button data-v="exec"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4" width="19" height="16" rx="3" fill="currentColor" stroke="none"/><path d="m7 9 3 3-3 3M12.5 15H17" stroke="var(--bar)" stroke-width="2"/></svg>Commandes</button>
     <button data-v="chat"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3c5 0 9 3.4 9 7.6s-4 7.6-9 7.6c-.9 0-1.8-.1-2.6-.3L5 20.5l.9-3.9C4.1 15.2 3 13 3 10.6 3 6.4 7 3 12 3"/></svg>Hermes</button>
   </nav>
@@ -434,15 +452,18 @@ const memS = { color: "--blue", v: r => pct(r.mem ?? r.memused, r.maxmem ?? r.me
 const legend = (items, right = "dernière heure") => `<div class="legend">${items.map(([c, l]) => `<span><b style="background:var(${c})"></b>${l}</span>`).join("")}<span class="grow"></span><span>${right}</span></div>`;
 
 // ---------- navigation
-const TITLES = { dash: "Serveur", guests: "Machines", exec: "Commandes", chat: "Hermes" };
+const TITLES = { dash: "Serveur", guests: "Machines", apps: "Apps", exec: "Commandes", chat: "Hermes" };
 function setView(v) {
   S.view = v;
   document.querySelectorAll(".tabbar button").forEach(b => b.classList.toggle("on", b.dataset.v === v));
-  ["dash", "guests", "exec", "chat"].forEach(k => $("#v-" + k).classList.toggle("hide", k !== v));
+  ["dash", "guests", "apps", "exec", "chat"].forEach(k => $("#v-" + k).classList.toggle("hide", k !== v));
   $("#navTitle").textContent = TITLES[v];
   $("#navRight").innerHTML = (v === "chat" ? (S.ov?.hermes ? `<button class="navbtn" id="permBtn" aria-label="Autorisations">${I.shield}</button>` : "")
+    : v === "apps" ? `<button class="navbtn" id="editApps">${S.appsEdit ? "<b>OK</b>" : "Modifier"}</button>`
     : `<span class="live" id="live"><i></i>en direct</span>`) + `<button class="navbtn" id="setBtn" aria-label="Apparence et réglages">${I.gear}</button>`;
   $("#setBtn").onclick = openSettings;
+  $("#editApps") && ($("#editApps").onclick = () => { S.appsEdit = !S.appsEdit; setView("apps"); });
+  if (v === "apps" && (!S.apps || Date.now() - S.appsAt > 30000)) loadApps();
   if (v === "chat") { $("#permBtn") && ($("#permBtn").onclick = openPerms); renderChat(); scrollChat(); }
   else scrollTo(0, 0);
   render(); onScroll();
@@ -456,6 +477,7 @@ function render() {
   if (S.view === "dash") renderDash();
   if (S.view === "guests") renderGuests();
   if (S.view === "exec") renderExec();
+  if (S.view === "apps") renderApps();
 }
 
 // ---------- tableau de bord
@@ -643,6 +665,58 @@ async function runAction(a, skipConfirm) {
   try { return await track(await d.run(a), text); }
   catch (e) { toast("❌ " + e.message); return e.message; }
 }
+
+// ---------- mes apps
+const APP_COLORS = ["blue", "indigo", "purple", "pink", "red", "orange", "green", "teal"];
+const appColor = s => APP_COLORS[[...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % APP_COLORS.length];
+async function loadApps(rescan) {
+  S.appsAt = Date.now();
+  try { const r = await api("/api/apps" + (rescan ? "?rescan=1" : "")); S.apps = r.apps; S.appsScan = r.scan; S.appsErr = null; }
+  catch (e) { S.appsErr = e.message; }
+  if (S.view === "apps") renderApps();
+}
+function appTile(a) {
+  let origin = ""; try { origin = new URL(a.url).origin; } catch {}
+  const letter = esc([...a.name.trim()][0]?.toUpperCase() || "?");
+  return `<${S.appsEdit ? "button" : `a href="${esc(a.url)}" target="_blank" rel="noopener"`} class="app ${a.hidden ? "hid" : ""}" data-app="${esc(a.id)}">
+    <span class="ai" style="background:var(--${appColor(a.name)})">${letter}${origin ? `<img src="${esc(origin)}/favicon.ico" alt="" loading="lazy" onerror="this.remove()">` : ""}</span>
+    ${a.hidden ? "" : `<span class="st ${a.up === true ? "up" : a.up === false ? "down" : ""}"></span>`}
+    <span class="an">${esc(a.name)}</span></${S.appsEdit ? "button" : "a"}>`;
+}
+function renderApps() {
+  const el = $("#v-apps");
+  if (!S.apps) { el.innerHTML = `<h1 class="large">Apps</h1><div class="empty">${S.appsErr ? esc(S.appsErr) : "Recherche des apps sur tes machines…"}</div>`; return; }
+  const list = S.appsEdit ? S.apps : S.apps.filter(a => !a.hidden);
+  el.innerHTML = `<h1 class="large">Apps</h1>
+    ${list.length || S.appsEdit ? `<div class="appgrid ${S.appsEdit ? "edit" : ""}">${list.map(appTile).join("")}
+      ${S.appsEdit ? `<button class="app add" data-add><span class="ai">+</span><span class="an">Ajouter</span></button>` : ""}</div>`
+      : `<div class="empty">Aucune app web trouvée.<br>Touche « Modifier » pour ajouter un lien.</div>`}
+    <div class="ftr" style="margin-top:24px">${S.appsEdit ? "Touche une app pour la renommer, changer son adresse ou la masquer."
+      : S.appsScan ? "Détectées automatiquement sur tes machines allumées. Point vert : l'app répond."
+      : "Active la section Commandes pour détecter les apps automatiquement. Tu peux aussi ajouter des liens à la main."}</div>
+    ${S.appsEdit ? "" : `<div class="group" style="margin-top:16px"><button class="cell tap act" id="rescan"><div class="body">Rechercher de nouvelles apps</div></button></div>`}`;
+  $("#rescan") && ($("#rescan").onclick = () => { S.apps = null; renderApps(); loadApps(true); });
+}
+async function saveApp(body) {
+  try { await api("/api/apps/save", { body }); await loadApps(); } catch (e) { toast("❌ " + e.message); }
+}
+$("#v-apps").addEventListener("click", async e => {
+  if (!S.appsEdit) return;
+  if (e.target.closest("[data-add]")) {
+    const v = await alertForm("Ajouter un lien", "Une app hors de Proxmox, ta box…", [{ name: "name", ph: "Nom" }, { name: "url", ph: "http://192.168.1.1" }]);
+    if (v) saveApp({ op: "add", ...v });
+    return;
+  }
+  const t = e.target.closest("[data-app]"); if (!t) return;
+  const a = S.apps.find(x => x.id === t.dataset.app); if (!a) return;
+  const btns = [{ label: "Renommer" }, { label: "Changer l'adresse" }, { label: a.hidden ? "Afficher" : "Masquer" }];
+  if (a.custom) btns.push({ label: "Supprimer le lien", danger: true });
+  const i = await actionSheet(esc(a.name), esc(a.url), btns);
+  if (i === 0) { const v = await alertForm("Renommer", "Laisse vide pour revenir au nom d'origine.", [{ name: "name", ph: "Nom", value: a.name }]); if (v) saveApp({ op: "edit", id: a.id, name: v.name }); }
+  if (i === 1) { const v = await alertForm("Adresse", "", [{ name: "url", ph: "http://…", value: a.url }]); if (v) saveApp({ op: "edit", id: a.id, url: v.url }); }
+  if (i === 2) saveApp({ op: "edit", id: a.id, hidden: !a.hidden });
+  if (i === 3) saveApp({ op: "delete", id: a.id });
+});
 
 // ---------- commandes
 const PRESETS = ["uptime", "df -h", "free -h", "top -bn1 | head -15", "ip -br a", "systemctl --failed", "apt list --upgradable 2>/dev/null", "docker ps"];
@@ -888,7 +962,8 @@ async function refresh() {
   try {
     S.ov = await api("/api/overview");
     $("#live")?.classList.remove("off"); $("#live") && ($("#live").lastChild.textContent = "en direct");
-    if (S.view !== "chat") render();
+    if (S.view !== "chat" && S.view !== "apps") render();
+    if (S.view === "apps" && Date.now() - S.appsAt > 30000) loadApps();
     if (S.guest) renderGuest();
   } catch (e) {
     if (e.message !== "Non connecté" && $("#live")) { $("#live").classList.add("off"); $("#live").lastChild.textContent = "hors ligne"; }

@@ -32,7 +32,7 @@ B64
 }
 
 push_app() {  # $1 = CTID
-  ctsh "$1" "mkdir -p /opt/pvehub/static"
+  ctsh "$1" "mkdir -p /opt/pvehub/static /opt/pvehub/data"
   pct push "$1" "$WORK/server.py" /opt/pvehub/server.py
   for f in index.html manifest.webmanifest icon.svg; do pct push "$1" "$WORK/static/$f" "/opt/pvehub/static/$f"; done
 }
@@ -41,7 +41,9 @@ push_app() {  # $1 = CTID
 # Gère Alpine (OpenRC) et les anciens conteneurs Debian (systemd).
 restart_app() {  # $1 = CTID
   ctsh "$1" "if command -v rc-service >/dev/null; then setsid sh -c 'sleep 3; rc-service pvehub restart' >/dev/null 2>&1 </dev/null &
-    else systemd-run --quiet --on-active=3 systemctl restart pvehub; fi"
+    else U=/etc/systemd/system/pvehub.service  # ancien conteneur Debian : /opt est en lecture seule sauf data/
+      grep -q '^ReadWritePaths' \$U || { sed -i '/^ProtectSystem/a ReadWritePaths=/opt/pvehub/data' \$U && systemctl daemon-reload; }
+      systemd-run --quiet --on-active=3 systemctl restart pvehub; fi"
   echo "PVE Hub redémarre dans 3 secondes."
 }
 
@@ -142,6 +144,7 @@ migrate)
   pct pull "$OLD" /opt/pvehub/.env "$WORK/env"
   mkdir -p "$WORK/ssh"
   for f in id_ed25519 id_ed25519.pub known_hosts; do pct pull "$OLD" "/opt/pvehub/ssh/$f" "$WORK/ssh/$f" 2>/dev/null || true; done
+  pct pull "$OLD" /opt/pvehub/data/apps.json "$WORK/apps.json" 2>/dev/null || true
   NET=$(pct config "$OLD" | sed -n 's/^net0: //p')  # même pont et même adresse MAC → même IP en DHCP
   STORE=$(pct config "$OLD" | sed -n 's/^rootfs: \([^:]*\):.*/\1/p')
   NEW=$(pvesh get /cluster/nextid)
@@ -151,6 +154,7 @@ migrate)
   pct stop "$OLD"
   if ! provision "$NEW" "$STORE" "$NET" || ! {
        pct push "$NEW" "$WORK/env" /opt/pvehub/.env --perms 600
+       [ -s "$WORK/apps.json" ] && pct push "$NEW" "$WORK/apps.json" /opt/pvehub/data/apps.json
        if [ -s "$WORK/ssh/id_ed25519" ]; then
          ctsh "$NEW" "mkdir -p /opt/pvehub/ssh/.ssh"
          for f in id_ed25519 id_ed25519.pub known_hosts; do [ -s "$WORK/ssh/$f" ] && pct push "$NEW" "$WORK/ssh/$f" "/opt/pvehub/ssh/$f"; done

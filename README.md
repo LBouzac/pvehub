@@ -6,6 +6,8 @@ Petite app web pour piloter ton Proxmox depuis le téléphone, avec Hermes inté
 - Machines (VM et CT) : démarrer, éteindre, redémarrer, forcer l'arrêt
 - Snapshots : créer, restaurer, supprimer
 - Sauvegardes : lancer maintenant, restaurer
+- Apps : tes services web (Home Assistant, Jellyfin…) en grille d'icônes, détectés automatiquement, avec un point vert s'ils répondent ;
+  renommer, changer l'adresse, masquer, ou ajouter tes propres liens (bouton Modifier)
 - Commandes : lancer une commande sur l'hôte, dans un conteneur ou une VM (agent QEMU requis) et voir le résultat
 - Hermes : il reçoit l'état du serveur à chaque message et peut proposer des actions, que tu valides d'un tap
 - Autorisations : Hermes te demande la permission avant ses commandes sensibles (Autoriser / Pour la session / Toujours / Refuser),
@@ -84,7 +86,7 @@ et la même adresse MAC, donc la même adresse IP. En cas d'échec, l'ancien con
 
 ## Développement
 
-Sources dans `app/`. `python3 build.py` régénère `pvehub-install.sh`.
+Sources dans `app/`. `python3 build.py` régénère `pvehub-install.sh`. Tests : `python3 app/test_server.py`.
 Lancer en local : `PVE_URL=https://IP:8006 PVE_TOKEN='user@pve!id=secret' APP_PASSWORD=x python3 app/server.py`.
 
 ## Licence

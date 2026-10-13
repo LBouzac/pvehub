@@ -14,7 +14,9 @@ import shlex
 import ssl
 import subprocess
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -53,6 +55,8 @@ SESSION_DAYS = 30
 SSH_DIR = os.environ.get("SSH_DIR", os.path.join(BASE, "ssh"))
 SSH_KEY = os.path.join(SSH_DIR, "id_ed25519")
 EXEC_ENABLED = os.path.isfile(SSH_KEY) and os.environ.get("EXEC_ENABLED", "true").lower() != "false"
+DATA_DIR = os.environ.get("DATA_DIR", os.path.join(BASE, "data"))
+APPS_FILE = os.path.join(DATA_DIR, "apps.json")
 
 if not PVE_URL or not PVE_TOKEN:
     sys.exit("PVE_URL et PVE_TOKEN sont obligatoires (voir .env).")
@@ -424,6 +428,184 @@ def r_approval(d):
     return hermes("POST", f"/v1/runs/{run_id}/approval", body)
 
 
+# ---------------------------------------------------------------- Mes apps
+# Ports qui ne sont jamais des interfaces web (SSH, DNS, bases de données, MQTT…)
+NOT_WEB = {21, 22, 23, 25, 53, 110, 111, 123, 135, 137, 138, 139, 143, 389, 445, 465, 587, 631, 636, 993, 995,
+           1883, 2049, 3306, 5353, 5432, 6379, 8883, 11211, 27017}
+PORT_NAMES = {8123: "Home Assistant", 8096: "Jellyfin", 32400: "Plex", 9000: "Portainer", 9443: "Portainer",
+              8642: "Hermes", 9091: "Transmission", 8989: "Sonarr", 7878: "Radarr", 9696: "Prowlarr",
+              8384: "Syncthing", 5678: "n8n", 3001: "Uptime Kuma", 19999: "Netdata", 8000: "", 8080: ""}
+HTTPS_PORTS = {443, 8443, 9443}
+_scan = {"at": 0, "data": {}}
+_apps_lock = threading.Lock()
+NO_VERIFY = ssl.create_default_context()
+NO_VERIFY.check_hostname = False
+NO_VERIFY.verify_mode = ssl.CERT_NONE
+
+
+def guest_ip(g):
+    try:
+        if g["type"] == "lxc":
+            for i in pve("GET", f"/nodes/{g['node']}/lxc/{g['vmid']}/interfaces", timeout=5) or []:
+                ip = (i.get("inet") or "").split("/")[0]
+                if i.get("name") != "lo" and ip and not ip.startswith("127."):
+                    return ip
+        else:
+            res = (pve("GET", f"/nodes/{g['node']}/qemu/{g['vmid']}/agent/network-get-interfaces", timeout=5) or {})
+            for i in res.get("result", []):
+                for a in i.get("ip-addresses", []):
+                    ip = a.get("ip-address", "")
+                    if a.get("ip-address-type") == "ipv4" and not ip.startswith("127.") and i.get("name") != "lo":
+                        return ip
+    except ApiError:
+        pass  # VM sans agent QEMU, conteneur arrêté… : pas d'IP connue
+    return None
+
+
+def parse_ports(text):
+    """Ports TCP en écoute hors localhost, depuis `ss -Htln` ou `netstat -tln` (4e colonne dans les deux)."""
+    ports = set()
+    for line in text.splitlines():
+        cols = line.split()
+        if len(cols) < 4 or (cols[0] == "tcp" and "LISTEN" not in line):
+            continue
+        host, _, port = cols[3].rpartition(":")
+        if port.isdigit() and not re.match(r"^\[?(127\.|::1\]?$|localhost)", host):
+            ports.add(int(port))
+    return ports
+
+
+def scan_ports(guests):
+    """Une seule connexion SSH : ports en écoute de chaque machine allumée. {"lxc/101": {8123, ...}}"""
+    if not EXEC_ENABLED or not guests:
+        return {}
+    probe = "ss -Htln 2>/dev/null || netstat -tln 2>/dev/null"
+    script = "".join(
+        f"echo @@{g['type']}/{g['vmid']}; " + (
+            f"timeout 6 pct exec {g['vmid']} -- sh -c {shlex.quote(probe)} 2>/dev/null; " if g["type"] == "lxc" else
+            f"timeout 9 qm guest exec {g['vmid']} --timeout 6 -- sh -c {shlex.quote(probe)} 2>/dev/null; ")
+        for g in guests)
+    _code, out = run_ssh(f"sh -c {shlex.quote(script)}", timeout=120)
+    found, cur, buf = {}, None, []
+    for line in out.splitlines() + ["@@end"]:
+        if line.startswith("@@"):
+            if cur:
+                text = "\n".join(buf)
+                try:  # qm guest exec renvoie du JSON
+                    text = json.loads(text).get("out-data", "")
+                except ValueError:
+                    pass
+                found[cur] = parse_ports(text)
+            cur, buf = line[2:].strip(), []
+        else:
+            buf.append(line)
+    return found
+
+
+def load_apps_cfg():
+    try:
+        with open(APPS_FILE, encoding="utf-8") as f:
+            cfg = json.load(f)
+    except (OSError, ValueError):
+        cfg = {}
+    cfg.setdefault("over", {})
+    cfg.setdefault("links", [])
+    return cfg
+
+
+def save_apps_cfg(cfg):
+    os.makedirs(DATA_DIR, exist_ok=True)
+    tmp = APPS_FILE + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, APPS_FILE)
+    except OSError as e:
+        raise ApiError(500, f"Impossible d'enregistrer ({e.strerror}). Relance la mise à jour de PVE Hub.")
+
+
+UP_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}),  # test direct, jamais via un proxy
+                                         urllib.request.HTTPSHandler(context=NO_VERIFY))
+
+
+def is_up(url):
+    req = urllib.request.Request(url, method="GET", headers={"User-Agent": "PVEHub"})
+    try:
+        with UP_OPENER.open(req, timeout=3):
+            return True
+    except urllib.error.HTTPError:
+        return True  # 401, 404… : le service répond
+    except (urllib.error.URLError, OSError, ValueError):
+        return False
+
+
+def r_apps(q):
+    guests = [g for g in pve("GET", "/cluster/resources", {"type": "vm"}) or []
+              if g.get("status") == "running" and not g.get("template")]
+    if q.get("rescan") or time.time() - _scan["at"] > 60:
+        with ThreadPoolExecutor(8) as ex:
+            ips = dict(zip((g["id"] for g in guests), ex.map(guest_ip, guests)))
+        ports = scan_ports(guests)
+        _scan.update(at=time.time(), data={"ips": ips, "ports": ports})
+    ips, ports = _scan["data"].get("ips", {}), _scan["data"].get("ports", {})
+    cfg = load_apps_cfg()
+    apps = []
+    for g in sorted(guests, key=lambda g: g["vmid"]):
+        ip, web = ips.get(g["id"]), sorted(p for p in ports.get(g["id"], ()) if p not in NOT_WEB)
+        if not ip or not web:
+            continue
+        for p in web:
+            url = f"{'https' if p in HTTPS_PORTS else 'http'}://{ip}{'' if p in (80, 443) else f':{p}'}{'/web' if p == 32400 else ''}"
+            label = PORT_NAMES.get(p, "")
+            name = g.get("name") or str(g["vmid"])
+            if len(web) > 1:
+                name = f"{name} · {label or p}"
+            apps.append({"id": f"{g['id']}:{p}", "name": name, "url": url, "guest": f"{g['type']}/{g['vmid']}"})
+    for link in cfg["links"]:
+        apps.append({**link, "custom": True})
+    for a in apps:
+        a.update({k: v for k, v in cfg["over"].get(a["id"], {}).items() if k in ("name", "url", "hidden")})
+    visible = [a for a in apps if not a.get("hidden")]
+    with ThreadPoolExecutor(16) as ex:
+        for a, up in zip(visible, ex.map(lambda a: is_up(a["url"]), visible)):
+            a["up"] = up
+    return {"apps": apps, "scan": EXEC_ENABLED}
+
+
+def clean_url(u):
+    u = str(u or "").strip()
+    if not re.match(r"^https?://[^\s/]+", u) or len(u) > 300:
+        raise ApiError(400, "Adresse invalide (elle doit commencer par http:// ou https://)")
+    return u
+
+
+def r_apps_save(d):
+    with _apps_lock:
+        cfg = load_apps_cfg()
+        aid = str(d.get("id", ""))[:80]
+        name = str(d.get("name", "")).strip()[:60]
+        if d.get("op") == "add":
+            if not name:
+                raise ApiError(400, "Donne un nom")
+            cfg["links"].append({"id": "link:" + secrets.token_hex(4), "name": name, "url": clean_url(d.get("url"))})
+        elif d.get("op") == "delete":
+            cfg["links"] = [l for l in cfg["links"] if l["id"] != aid]
+            cfg["over"].pop(aid, None)
+        elif d.get("op") == "edit" and aid:
+            over = cfg["over"].setdefault(aid, {})
+            if "name" in d:
+                over["name"] = name  # vide = revenir au nom détecté
+            if "url" in d:
+                over["url"] = clean_url(d["url"])
+            if "hidden" in d:
+                over["hidden"] = bool(d["hidden"])
+            cfg["over"][aid] = {k: v for k, v in over.items() if v not in ("", None, False)}
+        else:
+            raise ApiError(400, "Demande invalide")
+        save_apps_cfg(cfg)
+    return {"ok": True}
+
+
 def r_rrd(q):
     tf = q.get("tf", "hour")
     if tf not in ("hour", "day", "week"):
@@ -569,6 +751,8 @@ ROUTES = {
     ("POST", "/api/chat"): Handler.chat,
     ("POST", "/api/chat/approval"): r_approval,
     ("POST", "/api/exec"): r_exec,
+    ("GET", "/api/apps"): r_apps,
+    ("POST", "/api/apps/save"): r_apps_save,
 }
 
 
