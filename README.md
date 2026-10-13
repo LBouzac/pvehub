@@ -67,3 +67,7 @@ en root sur l'hôte ; « n » la retire.
 
 Sources dans `app/`. `python3 build.py` régénère `pvehub-install.sh`.
 Lancer en local : `PVE_URL=https://IP:8006 PVE_TOKEN='user@pve!id=secret' APP_PASSWORD=x python3 app/server.py`.
+
+## Licence
+
+MIT — voir [LICENSE](LICENSE).
