@@ -61,7 +61,8 @@ TOKEN_SECRET=$(pveum user token add pvehub@pve app --privsep 0 --output-format j
 
 say "Modèle Debian"
 pveam update >/dev/null
-TPL=$(pveam available --section system | awk '{print $2}' | grep -E '^debian-1[2-9]-standard' | sort -V | tail -1)
+TPL=$(pveam available --section system | awk '{print $2}' | grep -E "^debian-1[2-9]-standard_.*_$(dpkg --print-architecture)\.tar" | sort -V | tail -1)
+[ -n "$TPL" ] || { echo "❌ Aucun modèle Debian pour l'architecture $(dpkg --print-architecture)."; exit 1; }
 pveam list local | grep -q "$TPL" || pveam download local "$TPL"
 
 say "Création du conteneur $CTID (1 cœur, 128 Mo de RAM, 2 Go de disque)"
