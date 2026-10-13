@@ -829,7 +829,7 @@ function openSettings() {
         ${S.ver?.available ? `<button class="cell tap act" id="doUpd" ${S.ver.can_update ? "" : "disabled style='opacity:.4'"}><div class="body">Installer la nouvelle version</div></button>`
           : `<button class="cell tap act" id="chkUpd"><div class="body">${S.ver?.error ? esc(S.ver.error) : S.ver ? "À jour · Vérifier maintenant" : "Vérifier maintenant"}</div></button>`}
       </div>
-      ${S.ver && !S.ver.can_update ? `<div class="ftr">${esc(S.ver.why_not)}</div>` : ""}
+      <div class="ftr">${S.ver?.checked_at ? `Dernière vérification : ${when(S.ver.checked_at)}. ` : ""}Vérification automatique une fois par semaine.${S.ver && !S.ver.can_update ? "<br>" + esc(S.ver.why_not) : ""}</div>
       <div class="hdr">Compte</div>
       <div class="group"><button class="cell tap act danger" id="logout"><div class="body">Se déconnecter</div></button></div></div>`;
   };
@@ -1024,7 +1024,7 @@ async function start() {
   try { S.ov = await api("/api/overview"); } catch (e) { if (e.message === "Non connecté") return; }
   $("#login").classList.add("hide"); $("#app").classList.remove("hide");
   setView(S.view); loop();
-  checkVersion(); setInterval(() => document.visibilityState === "visible" && checkVersion(), 3600000);
+  checkVersion(); setInterval(() => document.visibilityState === "visible" && checkVersion(), 3600000);  // lit le cache du serveur, GitHub n'est interrogé qu'une fois par semaine
 }
 start();
 </script>

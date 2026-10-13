@@ -449,7 +449,8 @@ def github(url):
 
 def r_version(q):
     local, ctid = read_local("VERSION"), read_local("CTID")
-    if q.get("check") or _upd["data"] is None or time.time() - _upd["at"] > 3600:
+    # vérification GitHub une fois par semaine ; « Vérifier maintenant » (check=1) la force tout de suite
+    if q.get("check") or _upd["data"] is None or time.time() - _upd["at"] > 7 * 86400:
         try:
             # dernier commit exact puis VERSION à ce commit : évite le cache de 5 min de raw.githubusercontent.com
             sha = json.loads(github(f"https://api.github.com/repos/{UPDATE_REPO}/commits/main"))["sha"]
@@ -459,7 +460,7 @@ def r_version(q):
             _upd["data"] = {"remote": None, "sha": None, "error": f"GitHub injoignable : {getattr(e, 'reason', e)}"}
         _upd["at"] = time.time()
     d = _upd["data"]
-    return {"local": local or None, "remote": d["remote"], "error": d["error"],
+    return {"local": local or None, "remote": d["remote"], "error": d["error"], "checked_at": int(_upd["at"]),
             "available": bool(d["remote"] and d["remote"] != local),
             "can_update": EXEC_ENABLED and ctid.isdigit(),
             "why_not": None if EXEC_ENABLED and ctid.isdigit() else
