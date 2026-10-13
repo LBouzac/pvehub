@@ -34,6 +34,9 @@ B64
 push_app() {  # $1 = CTID
   ctsh "$1" "mkdir -p /opt/pvehub/static /opt/pvehub/data"
   pct push "$1" "$WORK/server.py" /opt/pvehub/server.py
+  # VERSION et CTID servent au bouton « Mettre à jour » de l'app
+  echo "@@VERSION@@" > "$WORK/VERSION"; echo "$1" > "$WORK/CTID"
+  pct push "$1" "$WORK/VERSION" /opt/pvehub/VERSION; pct push "$1" "$WORK/CTID" /opt/pvehub/CTID
   for f in index.html manifest.webmanifest icon.svg; do pct push "$1" "$WORK/static/$f" "/opt/pvehub/static/$f"; done
 }
 

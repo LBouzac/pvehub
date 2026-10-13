@@ -55,6 +55,7 @@ SESSION_DAYS = 30
 SSH_DIR = os.environ.get("SSH_DIR", os.path.join(BASE, "ssh"))
 SSH_KEY = os.path.join(SSH_DIR, "id_ed25519")
 EXEC_ENABLED = os.path.isfile(SSH_KEY) and os.environ.get("EXEC_ENABLED", "true").lower() != "false"
+UPDATE_REPO = os.environ.get("UPDATE_REPO", "LBouzac/pvehub")  # dépôt GitHub d'où viennent les mises à jour
 DATA_DIR = os.environ.get("DATA_DIR", os.path.join(BASE, "data"))
 APPS_FILE = os.path.join(DATA_DIR, "apps.json")
 
@@ -428,6 +429,62 @@ def r_approval(d):
     return hermes("POST", f"/v1/runs/{run_id}/approval", body)
 
 
+# ---------------------------------------------------------------- mise à jour
+_upd = {"at": 0, "data": None}
+
+
+def read_local(name):
+    try:
+        with open(os.path.join(BASE, name), encoding="utf-8") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def github(url):
+    req = urllib.request.Request(url, headers={"User-Agent": "PVEHub", "Accept": "application/vnd.github+json"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return r.read().decode()
+
+
+def r_version(q):
+    local, ctid = read_local("VERSION"), read_local("CTID")
+    if q.get("check") or _upd["data"] is None or time.time() - _upd["at"] > 3600:
+        try:
+            # dernier commit exact puis VERSION à ce commit : évite le cache de 5 min de raw.githubusercontent.com
+            sha = json.loads(github(f"https://api.github.com/repos/{UPDATE_REPO}/commits/main"))["sha"]
+            remote = github(f"https://raw.githubusercontent.com/{UPDATE_REPO}/{sha}/VERSION").strip()
+            _upd["data"] = {"remote": remote, "sha": sha, "error": None}
+        except (urllib.error.URLError, OSError, ValueError, KeyError) as e:
+            _upd["data"] = {"remote": None, "sha": None, "error": f"GitHub injoignable : {getattr(e, 'reason', e)}"}
+        _upd["at"] = time.time()
+    d = _upd["data"]
+    return {"local": local or None, "remote": d["remote"], "error": d["error"],
+            "available": bool(d["remote"] and d["remote"] != local),
+            "can_update": EXEC_ENABLED and ctid.isdigit(),
+            "why_not": None if EXEC_ENABLED and ctid.isdigit() else
+            ("Active la section Commandes pour mettre à jour depuis l'app." if not EXEC_ENABLED else
+             "Fais une dernière mise à jour depuis le Shell de Proxmox pour activer ce bouton.")}
+
+
+def r_update(_):
+    v = r_version({"check": 1})
+    if not v["can_update"]:
+        raise ApiError(409, v["why_not"])
+    if not v["available"]:
+        raise ApiError(409, v["error"] or "Déjà à jour")
+    sha = _upd["data"]["sha"]
+    if not re.fullmatch(r"[0-9a-f]{40}", sha or ""):
+        raise ApiError(502, "Réponse GitHub inattendue")
+    url = f"https://raw.githubusercontent.com/{UPDATE_REPO}/{sha}/pvehub-install.sh"
+    cmd = f"bash <(curl -fsSL {url}) update {int(read_local('CTID'))}"
+    # l'installeur redémarre l'app 3 s après avoir fini : la réponse a le temps de partir
+    code, out = run_ssh(f"bash -c {shlex.quote(cmd)}", timeout=240)
+    if code != 0:
+        raise ApiError(502, "La mise à jour a échoué :\n" + out[-1500:])
+    return {"ok": True, "version": v["remote"], "output": out[-1500:]}
+
+
 # ---------------------------------------------------------------- Mes apps
 # Ports qui ne sont jamais des interfaces web (SSH, DNS, bases de données, MQTT…)
 NOT_WEB = {21, 22, 23, 25, 53, 110, 111, 123, 135, 137, 138, 139, 143, 389, 445, 465, 587, 631, 636, 993, 995,
@@ -751,6 +808,8 @@ ROUTES = {
     ("POST", "/api/chat"): Handler.chat,
     ("POST", "/api/chat/approval"): r_approval,
     ("POST", "/api/exec"): r_exec,
+    ("GET", "/api/version"): r_version,
+    ("POST", "/api/update"): r_update,
     ("GET", "/api/apps"): r_apps,
     ("POST", "/api/apps/save"): r_apps_save,
 }

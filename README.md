@@ -50,6 +50,11 @@ confirmation, puis l'exécute avec son propre jeton.
 
 ## Mettre à jour
 
+Depuis l'app : quand une nouvelle version existe, un bandeau apparaît sur l'onglet Serveur (et un point rouge sur la
+roue dentée). Un tap l'installe. Il faut que la section Commandes soit activée.
+
+Ou depuis le Shell de Proxmox :
+
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/LBouzac/pvehub/main/pvehub-install.sh) update <ID-du-conteneur>
 ```

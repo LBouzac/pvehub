@@ -200,6 +200,8 @@ canvas{width:100%;height:120px;display:block}
 @keyframes wiggle{from{transform:rotate(-1.5deg)}to{transform:rotate(1.5deg)}}
 @media (prefers-reduced-motion:reduce){.appgrid.edit .app .ai{animation:none}}
 
+.badge{position:absolute;top:6px;right:5px;width:9px;height:9px;border-radius:50%;background:var(--red);border:1.5px solid var(--bg)}
+
 /* réglages d'apparence */
 .swatches{display:grid;grid-template-columns:repeat(auto-fill,minmax(44px,1fr));gap:10px;padding:14px 16px}
 .swatch{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;justify-self:center;border:3px solid transparent}
@@ -460,7 +462,7 @@ function setView(v) {
   $("#navTitle").textContent = TITLES[v];
   $("#navRight").innerHTML = (v === "chat" ? (S.ov?.hermes ? `<button class="navbtn" id="permBtn" aria-label="Autorisations">${I.shield}</button>` : "")
     : v === "apps" ? `<button class="navbtn" id="editApps">${S.appsEdit ? "<b>OK</b>" : "Modifier"}</button>`
-    : `<span class="live" id="live"><i></i>en direct</span>`) + `<button class="navbtn" id="setBtn" aria-label="Apparence et réglages">${I.gear}</button>`;
+    : `<span class="live" id="live"><i></i>en direct</span>`) + `<button class="navbtn" id="setBtn" aria-label="Apparence et réglages" style="position:relative">${I.gear}${S.ver?.available ? '<i class="badge"></i>' : ""}</button>`;
   $("#setBtn").onclick = openSettings;
   $("#editApps") && ($("#editApps").onclick = () => { S.appsEdit = !S.appsEdit; setView("apps"); });
   if (v === "apps" && (!S.apps || Date.now() - S.appsAt > 30000)) loadApps();
@@ -488,6 +490,8 @@ function renderDash() {
   const mem = nodes.reduce((a, n) => a + (n.mem || 0), 0), maxmem = nodes.reduce((a, n) => a + (n.maxmem || 0), 0);
   const st = storage.filter(s => s.status === "available" && s.maxdisk);
   let h = `<h1 class="large">Serveur</h1>
+    ${S.ver?.available ? `<div class="group" style="margin-bottom:14px"><button class="cell icon tap" id="updBanner">${icoBox(I.backup, "accent")}
+      <div class="body"><div class="t">Mise à jour disponible</div><div class="s">${S.ver.can_update ? "Touche pour installer la nouvelle version" : esc(S.ver.why_not)}</div></div>${I.chev}</button></div>` : ""}
     <div class="tiles">
       <button class="tile" onclick="setView('guests')"><div class="k" style="color:var(--green)">${I.play}Actives</div><div class="n">${run}<small> / ${real.length}</small></div></button>
       <div class="tile"><div class="k" style="color:var(--orange)">${I.cpu}CPU</div><div class="n">${cpu.toFixed(0)}<small> %</small></div>${bar(cpu)}</div>
@@ -507,6 +511,7 @@ function renderDash() {
   if (st.length) h += `<div class="hdr">Stockage</div><div class="group">` + st.map(s =>
     `<div class="cell"><div class="body"><div class="row"><span class="grow">${esc(s.storage)}${nodes.length > 1 ? ` <span class="mute">· ${esc(s.node)}</span>` : ""}</span><span class="mute">${fb(s.disk)} / ${fb(s.maxdisk)}</span></div>${bar(pct(s.disk, s.maxdisk))}</div></div>`).join("") + `</div>`;
   $("#v-dash").innerHTML = h;
+  $("#updBanner") && ($("#updBanner").onclick = () => S.ver.can_update ? doUpdate() : openSettings());
   loadNodeCharts();
 }
 let nodeRrdAt = 0, nodeRrd = {};
@@ -780,6 +785,27 @@ function renderExecLog() {
 }
 
 // ---------- autorisations Hermes
+// ---------- mise à jour
+async function checkVersion(force) {
+  try { S.ver = await api("/api/version" + (force ? "?check=1" : "")); } catch { return; }
+  if (S.view === "dash") renderDash();
+  const b = $("#setBtn");  // point rouge sur la roue dentée
+  if (b) { b.querySelector(".badge")?.remove(); if (S.ver?.available) b.insertAdjacentHTML("beforeend", '<i class="badge"></i>'); }
+}
+async function doUpdate() {
+  if (!await confirmBox("Mettre à jour PVE Hub ?", "L'app télécharge la nouvelle version depuis GitHub puis redémarre (environ 1 minute).", "Mettre à jour")) return;
+  const t = toast("⏳ Mise à jour en cours…", 600000);
+  try {
+    const r = await api("/api/update", { body: {} });
+    t.textContent = "🔄 Redémarrage de l'app…";
+    for (let i = 0; i < 45; i++) {  // attend que la nouvelle version réponde
+      await new Promise(res => setTimeout(res, 2000));
+      try { const v = await api("/api/version"); if (v.local === r.version) { location.reload(); return; } } catch {}
+    }
+    t.remove(); toast("L'app ne répond pas encore : recharge la page dans un moment.", 8000);
+  } catch (e) { t.remove(); toast("❌ " + e.message.split("\n")[0], 8000); }
+}
+
 // ---------- apparence
 const ACCENTS = [["blue", "Bleu"], ["indigo", "Indigo"], ["purple", "Violet"], ["pink", "Rose"], ["red", "Rouge"], ["orange", "Orange"], ["green", "Vert"], ["teal", "Turquoise"], ["mono", "Noir et blanc"]];
 const BGS = [["system", "Système"], ["tint", "Teinté"], ["contrast", "Contraste"]];
@@ -797,12 +823,21 @@ function openSettings() {
       <div class="ftr">${esc(ACCENTS.find(a => a[0] === acc)?.[1] || "")}</div>
       <div class="hdr">Fond</div>
       <div class="bgs">${BGS.map(([k, l]) => `<button class="bgopt ${bg === k ? "on" : ""}" data-bg="${k}"><span class="pv" data-pv="${k}"><b></b><b></b></span>${l}</button>`).join("")}</div>
+      <div class="hdr">Mise à jour</div>
+      <div class="group">
+        <div class="cell"><div class="body">Version</div><div class="v" style="font-family:var(--mono);font-size:15px">${esc(S.ver?.local || "inconnue")}</div></div>
+        ${S.ver?.available ? `<button class="cell tap act" id="doUpd" ${S.ver.can_update ? "" : "disabled style='opacity:.4'"}><div class="body">Installer la nouvelle version</div></button>`
+          : `<button class="cell tap act" id="chkUpd"><div class="body">${S.ver?.error ? esc(S.ver.error) : S.ver ? "À jour · Vérifier maintenant" : "Vérifier maintenant"}</div></button>`}
+      </div>
+      ${S.ver && !S.ver.can_update ? `<div class="ftr">${esc(S.ver.why_not)}</div>` : ""}
       <div class="hdr">Compte</div>
       <div class="group"><button class="cell tap act danger" id="logout"><div class="body">Se déconnecter</div></button></div></div>`;
   };
   draw();
   m.onclick = async e => {
     if (e.target === m || e.target.closest("[data-close]")) return m.remove();
+    if (e.target.closest("#doUpd")) { m.remove(); return doUpdate(); }
+    if (e.target.closest("#chkUpd")) { e.target.closest("#chkUpd").querySelector(".body").textContent = "Vérification…"; await checkVersion(true); return draw(); }
     if (e.target.closest("#logout")) { await api("/api/logout", { body: {} }).catch(() => {}); m.remove(); return showLogin(); }
     const b = e.target.closest("[data-mode],[data-accent],[data-bg]"); if (!b || b.tagName !== "BUTTON") return;
     if (b.dataset.mode) t.mode = b.dataset.mode === "auto" ? undefined : b.dataset.mode;
@@ -989,6 +1024,7 @@ async function start() {
   try { S.ov = await api("/api/overview"); } catch (e) { if (e.message === "Non connecté") return; }
   $("#login").classList.add("hide"); $("#app").classList.remove("hide");
   setView(S.view); loop();
+  checkVersion(); setInterval(() => document.visibilityState === "visible" && checkVersion(), 3600000);
 }
 start();
 </script>
