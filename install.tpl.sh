@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 # PVE Hub — installation en une commande, à lancer sur l'hôte Proxmox (root).
-#   bash pvehub-install.sh            → crée le conteneur, le jeton API et démarre l'app
-#   bash pvehub-install.sh update ID  → met à jour l'app dans le conteneur ID (garde la config)
+#   bash pvehub-install.sh             → crée le conteneur Alpine, le jeton API et démarre l'app
+#   bash pvehub-install.sh update ID   → met à jour l'app dans le conteneur ID (garde la config)
+#   bash pvehub-install.sh migrate ID  → remplace le conteneur ID (ancien, Debian) par un conteneur Alpine,
+#                                        avec la même config et la même adresse réseau
 set -euo pipefail
 
 [ "$(id -u)" = 0 ] || { echo "Lance ce script en root sur l'hôte Proxmox."; exit 1; }
 command -v pct >/dev/null || { echo "pct introuvable : ce script doit tourner sur l'hôte Proxmox."; exit 1; }
 
 say() { printf '\n\033[1;33m▶ %s\033[0m\n' "$*"; }
-ask() { local q=$1 d=${2:-} v; read -r -p "$q${d:+ [$d]} : " v </dev/tty; echo "${v:-$d}"; }
+# sans terminal (lancé depuis l'onglet Commandes) : on prend la valeur par défaut sans rien demander
+ask() { local q=$1 d=${2:-} v=""; if (exec </dev/tty) 2>/dev/null; then read -r -p "$q${d:+ [$d]} : " v </dev/tty || true; fi; echo "${v:-$d}"; }
+ctsh() { local id=$1; shift; pct exec "$id" -- sh -c "$*"; }  # Alpine n'a pas bash : sh partout dans le conteneur
 
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 unpack() {
@@ -28,48 +32,149 @@ B64
 }
 
 push_app() {  # $1 = CTID
-  pct exec "$1" -- mkdir -p /opt/pvehub/static
+  ctsh "$1" "mkdir -p /opt/pvehub/static"
   pct push "$1" "$WORK/server.py" /opt/pvehub/server.py
   for f in index.html manifest.webmanifest icon.svg; do pct push "$1" "$WORK/static/$f" "/opt/pvehub/static/$f"; done
 }
+
+# Redémarrage différé de 3 s : lancé depuis l'onglet Commandes, la réponse arrive avant la coupure.
+# Gère Alpine (OpenRC) et les anciens conteneurs Debian (systemd).
+restart_app() {  # $1 = CTID
+  ctsh "$1" "if command -v rc-service >/dev/null; then setsid sh -c 'sleep 3; rc-service pvehub restart' >/dev/null 2>&1 </dev/null &
+    else systemd-run --quiet --on-active=3 systemctl restart pvehub; fi"
+  echo "PVE Hub redémarre dans 3 secondes."
+}
+
+ct_ip() { ctsh "$1" "ip -4 addr show eth0" | awk '/inet /{sub(/\/.*/,"",$2); print $2; exit}'; }
 
 AUTH=/root/.ssh/authorized_keys
 setup_exec() {  # $1 = CTID — section Commandes : clé SSH du conteneur autorisée en root sur l'hôte
   local pub host
   if [ "$(ask "Activer la section Commandes ? (accès root à l'hôte par SSH) o/n" "o")" != o ]; then
-    pub=$(pct exec "$1" -- cat /opt/pvehub/ssh/id_ed25519.pub 2>/dev/null || true)
+    pub=$(ctsh "$1" "cat /opt/pvehub/ssh/id_ed25519.pub 2>/dev/null" || true)
     [ -n "$pub" ] && grep -vF "$pub" "$AUTH" > "$WORK/ak" && cat "$WORK/ak" > "$AUTH"
-    pct exec "$1" -- rm -rf /opt/pvehub/ssh
+    ctsh "$1" "rm -rf /opt/pvehub/ssh"
     echo "Commandes désactivées."; return
   fi
-  pct exec "$1" -- bash -c "command -v ssh >/dev/null || { apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openssh-client >/dev/null; }
+  ctsh "$1" "command -v ssh >/dev/null || { if command -v apk >/dev/null; then apk add -q --no-cache openssh-client-default openssh-keygen;
+      else apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq openssh-client >/dev/null; fi; }
     mkdir -p /opt/pvehub/ssh/.ssh && cd /opt/pvehub/ssh
-    usermod -d /opt/pvehub/ssh pvehub  # ssh veut un ~/.ssh existant, sinon il râle à chaque commande
+    command -v usermod >/dev/null && usermod -d /opt/pvehub/ssh pvehub  # ssh veut un ~/.ssh existant, sinon il râle
     [ -f id_ed25519 ] || ssh-keygen -q -t ed25519 -N '' -C pvehub -f id_ed25519"
-  pub=$(pct exec "$1" -- cat /opt/pvehub/ssh/id_ed25519.pub)
+  pub=$(ctsh "$1" "cat /opt/pvehub/ssh/id_ed25519.pub")
   # restrict : pas de redirection de ports ni d'agent, seulement des commandes
   grep -qF "$pub" "$AUTH" 2>/dev/null || echo "restrict $pub" >> "$AUTH"
-  host=$(pct exec "$1" -- sed -n 's|^PVE_URL=https\?://\([^:/]*\).*|\1|p' /opt/pvehub/.env)
+  host=$(ctsh "$1" "sed -n 's|^PVE_URL=https\?://\([^:/]*\).*|\1|p' /opt/pvehub/.env")
   ssh-keyscan -t ed25519 "$host" 2>/dev/null > "$WORK/kh"
   [ -s "$WORK/kh" ] || { echo "❌ Impossible de lire la clé SSH de l'hôte $host."; return 1; }
   pct push "$1" "$WORK/kh" /opt/pvehub/ssh/known_hosts
-  pct exec "$1" -- bash -c "chown -R pvehub /opt/pvehub/ssh && chmod 700 /opt/pvehub/ssh && chmod 600 /opt/pvehub/ssh/id_ed25519"
+  ctsh "$1" "chown -R pvehub /opt/pvehub/ssh && chmod 700 /opt/pvehub/ssh && chmod 600 /opt/pvehub/ssh/id_ed25519"
   echo "Commandes activées."
+}
+
+# Crée et prépare un conteneur Alpine avec Python, l'utilisateur pvehub, l'app et son service (non démarré).
+# $1 = CTID, $2 = stockage, $3 = options réseau net0
+provision() {
+  local id=$1 store=$2 net=$3 arch tpl
+  say "Modèle Alpine"
+  pveam update >/dev/null
+  arch=$(dpkg --print-architecture)
+  tpl=$(pveam available --section system | awk '{print $2}' | grep -E "^alpine-3\.[0-9]+-default_.*_${arch}\.tar" | sort -V | tail -1)
+  [ -n "$tpl" ] || { echo "❌ Aucun modèle Alpine pour l'architecture $arch."; return 1; }
+  pveam list local | grep -q "$tpl" || pveam download local "$tpl"
+
+  say "Création du conteneur $id (1 cœur, 64 Mo de RAM, 1 Go de disque)"
+  pct create "$id" "local:vztmpl/$tpl" --hostname pvehub --cores 1 --memory 64 --swap 64 \
+    --rootfs "$store:1" --net0 "$net" --unprivileged 1 --onboot 1 \
+    --description "PVE Hub — interface Proxmox + Hermes"
+  # pct create --start n'échoue pas si le démarrage rate : on démarre à part pour s'arrêter net
+  pct start "$id" || { echo "❌ Le conteneur $id ne démarre pas. Détail : pct start $id --debug"; return 1; }
+
+  say "Attente du réseau"
+  for _ in $(seq 30); do ctsh "$id" "nslookup dl-cdn.alpinelinux.org >/dev/null 2>&1" && break; sleep 2; done
+
+  say "Installation de Python (seule dépendance)"
+  ctsh "$id" "apk add -q --no-cache python3 && adduser -S -D -H -h /opt/pvehub/ssh -s /sbin/nologin pvehub"
+  push_app "$id"
+  cat > "$WORK/initd" <<'EOF'
+#!/sbin/openrc-run
+name="PVE Hub"
+command="/usr/bin/python3"
+command_args="/opt/pvehub/server.py"
+command_user="pvehub"
+supervisor="supervise-daemon"
+respawn_delay=3
+output_log="/var/log/pvehub.log"
+error_log="/var/log/pvehub.log"
+depend() { need net; }
+start_pre() { checkpath -f -o pvehub -m 0640 /var/log/pvehub.log; }
+EOF
+  pct push "$id" "$WORK/initd" /etc/init.d/pvehub --perms 755
+  ctsh "$id" "rc-update add pvehub default >/dev/null"
+}
+
+start_and_check() {  # $1 = CTID — démarre le service et vérifie qu'il répond
+  ctsh "$1" "chown -R pvehub /opt/pvehub && rc-service pvehub start >/dev/null"
+  for _ in $(seq 10); do
+    ctsh "$1" "wget -q -O /dev/null http://127.0.0.1:8080/ 2>/dev/null" && return 0; sleep 1
+  done
+  echo "❌ L'app ne répond pas. Journal :"; ctsh "$1" "tail -n 20 /var/log/pvehub.log" || true; return 1
 }
 
 unpack
 
-if [ "${1:-}" = update ]; then
+case "${1:-}" in
+update)
   CTID=${2:?usage : bash pvehub-install.sh update <CTID>}
   say "Mise à jour de PVE Hub dans le CT $CTID"
   push_app "$CTID"
   setup_exec "$CTID" || true
-  pct exec "$CTID" -- chown -R pvehub /opt/pvehub
-  # redémarrage différé : si la mise à jour est lancée depuis l'onglet Commandes, la réponse arrive avant la coupure
-  pct exec "$CTID" -- systemd-run --quiet --on-active=3 systemctl restart pvehub
-  echo "PVE Hub redémarre dans 3 secondes."
-  echo "✅ Mis à jour."; exit 0
-fi
+  ctsh "$CTID" "chown -R pvehub /opt/pvehub"
+  restart_app "$CTID"
+  echo "✅ Mis à jour."; exit 0 ;;
+
+migrate)
+  OLD=${2:?usage : bash pvehub-install.sh migrate <CTID actuel>}
+  # le conteneur actuel va s'arrêter : lancé depuis l'onglet Commandes, la migration mourrait en route
+  (exec </dev/tty) 2>/dev/null || { echo "❌ Lance la migration depuis le Shell de Proxmox, pas depuis l'onglet Commandes."; exit 1; }
+  pct config "$OLD" >/dev/null || { echo "❌ Conteneur $OLD introuvable."; exit 1; }
+  say "Récupération de la configuration du CT $OLD"
+  pct pull "$OLD" /opt/pvehub/.env "$WORK/env"
+  mkdir -p "$WORK/ssh"
+  for f in id_ed25519 id_ed25519.pub known_hosts; do pct pull "$OLD" "/opt/pvehub/ssh/$f" "$WORK/ssh/$f" 2>/dev/null || true; done
+  NET=$(pct config "$OLD" | sed -n 's/^net0: //p')  # même pont et même adresse MAC → même IP en DHCP
+  STORE=$(pct config "$OLD" | sed -n 's/^rootfs: \([^:]*\):.*/\1/p')
+  NEW=$(pvesh get /cluster/nextid)
+  echo "Nouveau conteneur : $NEW (stockage $STORE, réseau : $NET)"
+  [ "$(ask "Continuer ? Le CT $OLD sera arrêté pendant la migration. o/n" "o")" = o ] || exit 0
+
+  pct stop "$OLD"
+  if ! provision "$NEW" "$STORE" "$NET" || ! {
+       pct push "$NEW" "$WORK/env" /opt/pvehub/.env --perms 600
+       if [ -s "$WORK/ssh/id_ed25519" ]; then
+         ctsh "$NEW" "mkdir -p /opt/pvehub/ssh/.ssh"
+         for f in id_ed25519 id_ed25519.pub known_hosts; do [ -s "$WORK/ssh/$f" ] && pct push "$NEW" "$WORK/ssh/$f" "/opt/pvehub/ssh/$f"; done
+         ctsh "$NEW" "apk add -q --no-cache openssh-client-default && chmod 700 /opt/pvehub/ssh && chmod 600 /opt/pvehub/ssh/id_ed25519"
+       fi
+       start_and_check "$NEW"
+     }; then
+    echo "❌ Migration échouée : retour à l'ancien conteneur."
+    pct stop "$NEW" 2>/dev/null || true
+    pct set "$NEW" --onboot 0 2>/dev/null || true
+    pct start "$OLD"
+    echo "Le CT $OLD tourne de nouveau. Le CT $NEW (raté) est arrêté ; supprime-le avec : pct destroy $NEW"
+    exit 1
+  fi
+  pct set "$OLD" --onboot 0
+  say "Migration réussie"
+  echo "  Nouveau conteneur : $NEW — http://$(ct_ip "$NEW"):8080"
+  if [ "$(ask "Supprimer définitivement l'ancien CT $OLD ? o/n" "n")" = o ]; then
+    pct destroy "$OLD" && echo "CT $OLD supprimé."
+  else
+    echo "  Le CT $OLD est arrêté et ne redémarrera plus tout seul. Supprime-le plus tard avec : pct destroy $OLD"
+  fi
+  exit 0 ;;
+esac
 
 say "Réglages (Entrée = valeur par défaut)"
 CTID=$(ask "ID du conteneur" "$(pvesh get /cluster/nextid)")
@@ -87,26 +192,7 @@ pveum user token remove pvehub@pve app 2>/dev/null || true
 TOKEN_SECRET=$(pveum user token add pvehub@pve app --privsep 0 --output-format json | grep -o '"value" *: *"[^"]*"' | cut -d'"' -f4)
 [ -n "$TOKEN_SECRET" ] || { echo "Impossible de créer le jeton API."; exit 1; }
 
-say "Modèle Debian"
-pveam update >/dev/null
-TPL=$(pveam available --section system | awk '{print $2}' | grep -E "^debian-1[2-9]-standard_.*_$(dpkg --print-architecture)\.tar" | sort -V | tail -1)
-[ -n "$TPL" ] || { echo "❌ Aucun modèle Debian pour l'architecture $(dpkg --print-architecture)."; exit 1; }
-pveam list local | grep -q "$TPL" || pveam download local "$TPL"
-
-say "Création du conteneur $CTID (1 cœur, 128 Mo de RAM, 2 Go de disque)"
-pct create "$CTID" "local:vztmpl/$TPL" --hostname pvehub --cores 1 --memory 128 --swap 128 \
-  --rootfs "$STORE:2" --net0 "name=eth0,bridge=$BRIDGE,ip=dhcp" --unprivileged 1 --features nesting=1 \
-  --onboot 1 --description "PVE Hub — interface Proxmox + Hermes"
-# pct create --start n'échoue pas si le démarrage rate : on démarre à part pour s'arrêter net
-pct start "$CTID" || { echo "❌ Le conteneur $CTID ne démarre pas. Détail : pct start $CTID --debug"; exit 1; }
-
-say "Attente du réseau"
-for _ in $(seq 30); do pct exec "$CTID" -- getent hosts deb.debian.org >/dev/null 2>&1 && break; sleep 2; done
-
-say "Installation de Python (seule dépendance)"
-pct exec "$CTID" -- bash -c "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3 >/dev/null && useradd -r -s /usr/sbin/nologin pvehub"
-
-push_app "$CTID"
+provision "$CTID" "$STORE" "name=eth0,bridge=$BRIDGE,ip=dhcp"
 HOST_IP=$(hostname -I | awk '{print $1}')
 cat > "$WORK/env" <<EOF
 PVE_URL=https://$HOST_IP:8006
@@ -120,35 +206,13 @@ PORT=8080
 EOF
 pct push "$CTID" "$WORK/env" /opt/pvehub/.env --perms 600
 setup_exec "$CTID" || true
-cat > "$WORK/unit" <<'EOF'
-[Unit]
-Description=PVE Hub
-After=network-online.target
-Wants=network-online.target
+start_and_check "$CTID"
 
-[Service]
-User=pvehub
-ExecStart=/usr/bin/python3 /opt/pvehub/server.py
-Restart=always
-RestartSec=3
-MemoryMax=80M
-NoNewPrivileges=yes
-ProtectSystem=strict
-ProtectHome=yes
-PrivateTmp=yes
-
-[Install]
-WantedBy=multi-user.target
-EOF
-pct push "$CTID" "$WORK/unit" /etc/systemd/system/pvehub.service
-pct exec "$CTID" -- bash -c "chown -R pvehub /opt/pvehub && systemctl daemon-reload && systemctl enable --now pvehub"
-
-sleep 2
-CT_IP=$(pct exec "$CTID" -- hostname -I | awk '{print $1}')
 say "C'est prêt"
-echo "  Adresse       : http://$CT_IP:8080"
+echo "  Adresse       : http://$(ct_ip "$CTID"):8080"
 echo "  Mot de passe  : $APP_PASSWORD"
-echo "  Configuration : pct enter $CTID puis nano /opt/pvehub/.env (systemctl restart pvehub)"
+echo "  Configuration : pct enter $CTID puis vi /opt/pvehub/.env, puis rc-service pvehub restart"
 echo
 echo "  Sur ton téléphone : ouvre l'adresse puis « Ajouter à l'écran d'accueil »."
 [ -n "$HERMES_URL" ] && echo "  Hermes doit écouter sur le réseau : API_SERVER_HOST=0.0.0.0 dans ~/.hermes/.env, puis redémarre « hermes gateway »."
+exit 0

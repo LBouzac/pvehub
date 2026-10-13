@@ -11,7 +11,8 @@ Petite app web pour piloter ton Proxmox depuis le téléphone, avec Hermes inté
 - Autorisations : Hermes te demande la permission avant ses commandes sensibles (Autoriser / Pour la session / Toujours / Refuser),
   et tu peux l'autoriser d'avance à démarrer, éteindre, redémarrer, snapshoter ou sauvegarder (bouton bouclier dans l'onglet Hermes)
 
-Ultra léger : un conteneur Debian de 128 Mo, Python seul, aucune dépendance, aucun build.
+Ultra léger : un conteneur Alpine Linux (64 Mo de RAM, 1 Go de disque, environ 30 Mo réellement utilisés en RAM),
+Python seul, aucune dépendance, aucun build.
 L'app ne rafraîchit les données que lorsqu'elle est ouverte à l'écran.
 
 ## Installation (sur l'hôte Proxmox, en root)
@@ -24,7 +25,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/LBouzac/pvehub/main/pvehub-i
 
 Le script pose 5 questions (Entrée = valeur par défaut), puis :
 1. crée l'utilisateur `pvehub@pve` et un jeton API (rôles PVEVMAdmin, PVEDatastoreUser, PVEAuditor) ;
-2. crée un conteneur Debian non privilégié (1 cœur, 128 Mo, 2 Go) ;
+2. crée un conteneur Alpine non privilégié (1 cœur, 64 Mo, 1 Go) ;
 3. installe l'app comme service et affiche l'adresse et le mot de passe.
 
 Sur le téléphone : ouvre l'adresse, puis « Ajouter à l'écran d'accueil ».
@@ -40,7 +41,7 @@ API_SERVER_KEY=une-cle-longue-et-secrete
 ```
 
 Puis redémarre `hermes gateway`. Donne l'URL (`http://IP-de-hermes:8642`) et la clé au script d'installation,
-ou plus tard dans `/opt/pvehub/.env` du conteneur, suivi de `systemctl restart pvehub`.
+ou plus tard dans `/opt/pvehub/.env` du conteneur, suivi de `rc-service pvehub restart`.
 
 Hermes ne touche jamais Proxmox directement depuis l'app : il propose un bloc d'action, l'app te demande
 confirmation, puis l'exécute avec son propre jeton.
@@ -52,7 +53,25 @@ bash <(curl -fsSL https://raw.githubusercontent.com/LBouzac/pvehub/main/pvehub-i
 ```
 
 La mise à jour demande si tu veux la section Commandes : « o » crée une clé SSH dans le conteneur et l'autorise
-en root sur l'hôte ; « n » la retire.
+en root sur l'hôte ; « n » la retire. Lancée depuis l'onglet Commandes, elle garde le réglage actuel sans rien demander.
+
+## Passer d'un ancien conteneur Debian à Alpine
+
+Les installations d'avant octobre 2026 utilisaient Debian. Pour passer à Alpine (moins de RAM et de disque),
+depuis le Shell de Proxmox (pas depuis l'onglet Commandes) :
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/LBouzac/pvehub/main/pvehub-install.sh) migrate <ID-du-conteneur>
+```
+
+Le script crée un nouveau conteneur Alpine avec la même configuration (mot de passe, clé Hermes, clé SSH)
+et la même adresse MAC, donc la même adresse IP. En cas d'échec, l'ancien conteneur redémarre tout seul.
+À la fin, il propose de supprimer l'ancien.
+
+## Dépannage
+
+- Journal de l'app : `pct exec <ID> -- tail -n 50 /var/log/pvehub.log`
+- Redémarrer l'app : `pct exec <ID> -- rc-service pvehub restart`
 
 ## Sécurité
 
