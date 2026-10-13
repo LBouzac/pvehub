@@ -67,7 +67,9 @@ pveam list local | grep -q "$TPL" || pveam download local "$TPL"
 say "Création du conteneur $CTID (1 cœur, 128 Mo de RAM, 2 Go de disque)"
 pct create "$CTID" "local:vztmpl/$TPL" --hostname pvehub --cores 1 --memory 128 --swap 128 \
   --rootfs "$STORE:2" --net0 "name=eth0,bridge=$BRIDGE,ip=dhcp" --unprivileged 1 --features nesting=1 \
-  --onboot 1 --start 1 --description "PVE Hub — interface Proxmox + Hermes"
+  --onboot 1 --description "PVE Hub — interface Proxmox + Hermes"
+# pct create --start n'échoue pas si le démarrage rate : on démarre à part pour s'arrêter net
+pct start "$CTID" || { echo "❌ Le conteneur $CTID ne démarre pas. Détail : pct start $CTID --debug"; exit 1; }
 
 say "Attente du réseau"
 for _ in $(seq 30); do pct exec "$CTID" -- getent hosts deb.debian.org >/dev/null 2>&1 && break; sleep 2; done
