@@ -351,6 +351,7 @@ const I = {
   bolt: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>',
   term: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 7 5 5-5 5M12 17h7"/></svg>',
   chat: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3c5 0 9 3.4 9 7.6s-4 7.6-9 7.6c-.9 0-1.8-.1-2.6-.3L5 20.5l.9-3.9C4.1 15.2 3 13 3 10.6 3 6.4 7 3 12 3"/></svg>',
+  plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
   gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1"/></svg>',
   wrench: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><path d="M14.7 6.3a4 4 0 0 0 5 5L21 13l-8 8-3-3 8-8-1.3-1.3a4 4 0 0 0-5-5L14 6z"/></svg>',
 };
@@ -733,10 +734,12 @@ function renderExec() {
       <div class="t">Pas encore activé</div><div class="s" style="line-height:1.4">Les commandes passent par une clé SSH vers l'hôte Proxmox. Relance l'installeur en mode mise à jour et réponds « o » à la question sur les commandes.</div></div></div></div>`;
     return;
   }
-  if (el.dataset.ready && !$("#target")?.matches(":focus")) { fillTargets(); return; }
+  if (el.dataset.ready && !document.activeElement?.matches("select")) { fillTargets(); return; }
   if (el.dataset.ready) return;
   el.dataset.ready = 1;
   el.innerHTML = `<h1 class="large">Commandes</h1>
+    <div class="seg" id="execSeg"><button class="on" data-sec="run">Exécuter</button><button data-sec="cron">Tâches planifiées</button></div>
+    <div id="secRun">
     <div class="group">
       <label class="cell"><div class="body">Exécuter sur</div><select id="target" class="picker" aria-label="Cible"></select>${I.chev}</label>
       <textarea id="cmd" class="term" placeholder="ex. df -h" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Commande"></textarea>
@@ -745,8 +748,17 @@ function renderExec() {
     <div class="hdr">Raccourcis</div>
     <div class="chips">${PRESETS.map(p => `<button class="chip" data-pre="${esc(p)}">${esc(p)}</button>`).join("")}</div>
     <div class="ftr">Sur l'hôte, en root. Dans une VM, l'agent QEMU doit être installé. 60 s maximum par commande.</div>
-    <div id="execLog"></div>`;
+    <div id="execLog"></div></div>
+    <div id="secCron" class="hide">
+      <div class="group"><label class="cell"><div class="body">Machine</div><select id="cronTarget" class="picker" aria-label="Machine"></select>${I.chev}</label></div>
+      <div class="hdr"><span class="grow">Tâches</span><button id="cronReload">Actualiser</button></div>
+      <div class="group" id="cronList"></div>
+      <div class="ftr">Crontab de root. Les tâches système (/etc/cron.d) et les sauvegardes planifiées de Proxmox ne sont pas listées ici.</div>
+    </div>`;
   fillTargets(); renderExecLog();
+  $("#execSeg").onclick = e => { const sec = e.target.dataset.sec; if (!sec) return; showExecSection(sec); };
+  $("#cronTarget").onchange = e => { S.cronTarget = e.target.value; loadCron(); };
+  $("#cronReload").onclick = () => loadCron();
   $("#runCmd").onclick = runExec;
   $("#cmd").addEventListener("keydown", e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) runExec(); });
   el.querySelector(".chips").onclick = e => { const p = e.target.dataset.pre; if (p) { $("#cmd").value = p; runExec(); } };
@@ -761,6 +773,140 @@ function fillTargets() {
   const cur = S.execTarget || opts[0][0];
   sel.innerHTML = opts.map(([v, l]) => `<option value="${esc(v)}" ${v === cur ? "selected" : ""}>${esc(l)}</option>`).join("");
   if (sel.value !== cur) S.execTarget = sel.value;
+  const cs = $("#cronTarget"); if (!cs) return;
+  const copts = opts.filter(([v]) => !v.includes('"qemu"'));  // crontab : hôte et conteneurs
+  const ccur = S.cronTarget || copts[0][0];
+  cs.innerHTML = copts.map(([v, l]) => `<option value="${esc(v)}" ${v === ccur ? "selected" : ""}>${esc(l)}</option>`).join("");
+  if (cs.value !== ccur) { S.cronTarget = cs.value; if (S.execSec === "cron") loadCron(); }
+}
+function showExecSection(sec) {
+  S.execSec = sec;
+  $("#execSeg").querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.sec === sec));
+  $("#secRun").classList.toggle("hide", sec !== "run"); $("#secCron").classList.toggle("hide", sec !== "cron");
+  if (sec === "cron" && !S.cron) loadCron();
+}
+
+// ---------- tâches planifiées (crontab)
+const DAYS = ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"];
+const DAYN = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
+// Planification cron → français ; null si trop exotique (on affiche alors l'expression brute)
+function cronFr(s) {
+  const sp = { "@reboot": "Au démarrage", "@hourly": "Toutes les heures", "@daily": "Tous les jours à 00:00", "@midnight": "Tous les jours à 00:00",
+    "@weekly": "Le dimanche à 00:00", "@monthly": "Le 1er du mois à 00:00", "@yearly": "Le 1er janvier à 00:00", "@annually": "Le 1er janvier à 00:00" }[s.toLowerCase()];
+  if (sp) return sp;
+  const [mi, h, dom, mon, dow] = s.split(" "), num = x => /^\d+$/.test(x);
+  if (mon !== "*") return null;
+  if (mi === "*" && h === "*" && dom === "*" && dow === "*") return "Chaque minute";
+  let m = mi.match(/^\*\/(\d+)$/);
+  if (m && h === "*" && dom === "*" && dow === "*") return `Toutes les ${m[1]} minutes`;
+  if (num(mi) && h === "*" && dom === "*" && dow === "*") return `Toutes les heures à :${mi.padStart(2, "0")}`;
+  if (num(mi) && (m = h.match(/^\*\/(\d+)$/)) && dom === "*" && dow === "*") return `Toutes les ${m[1]} heures à :${mi.padStart(2, "0")}`;
+  if (!num(mi) || !num(h)) return null;
+  const t = `${h.padStart(2, "0")}:${mi.padStart(2, "0")}`;
+  if (dom === "*" && dow === "*") return `Tous les jours à ${t}`;
+  const day = x => DAYS[num(x) ? +x : DAYN[x.toLowerCase()]];
+  if (dom === "*") {
+    if ((m = dow.match(/^(\w+)-(\w+)$/)) && day(m[1]) && day(m[2])) return `Du ${day(m[1])} au ${day(m[2])} à ${t}`;
+    const ds = dow.split(",").map(day);
+    if (ds.every(Boolean)) return `Le ${ds.join(", ").replace(/, ([^,]*)$/, " et $1")} à ${t}`;
+    return null;
+  }
+  if (num(dom) && dow === "*") return `Le ${dom === "1" ? "1er" : dom} de chaque mois à ${t}`;
+  return null;
+}
+const cronTgt = () => JSON.parse(S.cronTarget || '{"type":"host"}');
+async function loadCron() {
+  const el = $("#cronList"); if (!el) return;
+  el.innerHTML = `<div class="cell"><div class="body mute">Chargement…</div></div>`;
+  try { S.cron = await api("/api/cron?" + qs(cronTgt())); } catch (e) { S.cron = { error: e.message }; }
+  renderCron();
+}
+function renderCron() {
+  const el = $("#cronList"), c = S.cron; if (!el || !c) return;
+  if (c.error) { el.innerHTML = `<div class="cell"><div class="body mute">${esc(c.error)}</div></div>`; return; }
+  if (!c.available) { el.innerHTML = `<div class="cell"><div class="body"><div class="t">cron n'est pas installé</div><div class="s">Sur Alpine : apk add cronie. Sur Debian : apt install cron.</div></div></div>`; return; }
+  el.innerHTML = c.entries.map(e => `<button class="cell tap" data-cron="${e.i}" style="${e.enabled ? "" : "opacity:.45"}"><div class="body">
+      <div class="t">${esc(cronFr(e.sched) || e.sched)}${e.enabled ? "" : ' <span class="pill">désactivée</span>'}</div>
+      <div class="s ell" style="font-family:var(--mono);font-size:12.5px">${cronFr(e.sched) ? esc(e.sched) + " · " : ""}${esc(e.cmd)}</div></div>${I.chev}</button>`).join("")
+    + `<button class="cell icon tap act" data-cron-add>${icoBox(I.plus, "accent")}<div class="body">Ajouter une tâche</div></button>`;
+}
+async function cronSave(body) {
+  try { S.cron = await api("/api/cron", { body: { ...cronTgt(), hash: S.cron.hash, ...body } }); renderCron(); return true; }
+  catch (e) { toast("❌ " + e.message, 6000); if (e.message.includes("changé")) loadCron(); return false; }
+}
+$("#v-exec").addEventListener("click", async e => {
+  if (e.target.closest("[data-cron-add]")) return cronEditor();
+  const row = e.target.closest("[data-cron]"); if (!row) return;
+  const job = S.cron.entries.find(x => x.i === +row.dataset.cron); if (!job) return;
+  const i = await actionSheet(esc(cronFr(job.sched) || job.sched), `<span style="font-family:var(--mono)">${esc(job.cmd)}</span>`,
+    [{ label: "Lancer maintenant" }, { label: "Modifier" }, { label: job.enabled ? "Désactiver" : "Activer" }, { label: "Supprimer", danger: true }]);
+  if (i === 0) {  // exécution immédiate : on passe par l'onglet Exécuter pour voir le résultat
+    showExecSection("run"); S.execTarget = S.cronTarget; fillTargets(); $("#cmd").value = job.cmd; runExec();
+  }
+  if (i === 1) cronEditor(job);
+  if (i === 2) cronSave({ op: "toggle", i: job.i });
+  if (i === 3 && await confirmBox("Supprimer cette tâche ?", esc(job.cmd), "Supprimer", true)) cronSave({ op: "delete", i: job.i });
+});
+const CRON_PRESETS = [["5min", "Toutes les 5 minutes"], ["hour", "Toutes les heures"], ["day", "Tous les jours"], ["week", "Chaque semaine"],
+  ["month", "Chaque mois"], ["reboot", "Au démarrage"], ["custom", "Personnalisé"]];
+function cronEditor(job) {
+  const m = document.createElement("div"); m.className = "modal";
+  m.innerHTML = `<form class="card-sheet"><div class="grab"></div>
+    <div class="shead"><button type="button" class="navbtn" data-close style="width:84px">Annuler</button><h2>${job ? "Modifier" : "Nouvelle tâche"}</h2>
+      <button class="navbtn" style="font-weight:600;width:84px;justify-content:flex-end">Enregistrer</button></div>
+    <div class="hdr">Quand</div><div class="group">
+      <label class="cell"><div class="body">Fréquence</div><select name="preset" class="picker">${CRON_PRESETS.map(([k, l]) => `<option value="${k}">${l}</option>`).join("")}</select>${I.chev}</label>
+      <label class="cell" data-f="time"><div class="body">Heure</div><input type="time" name="time" value="03:00" class="picker" style="direction:ltr"></label>
+      <label class="cell" data-f="dow"><div class="body">Jour</div><select name="dow" class="picker">${[1, 2, 3, 4, 5, 6, 0].map(d => `<option value="${d}">${DAYS[d]}</option>`).join("")}</select>${I.chev}</label>
+      <label class="cell" data-f="dom"><div class="body">Jour du mois</div><select name="dom" class="picker">${Array.from({ length: 28 }, (_, i) => `<option>${i + 1}</option>`).join("")}</select>${I.chev}</label>
+      <label class="cell"><div class="body">Expression cron</div><input name="sched" class="picker" style="direction:ltr;font-family:var(--mono);max-width:55%" autocapitalize="off" spellcheck="false"></label>
+    </div>
+    <div class="ftr" id="cronPreview"></div>
+    <div class="hdr">Commande</div><div class="group"><textarea name="cmd" class="term" placeholder="/root/sauvegarde.sh" autocapitalize="off" autocorrect="off" spellcheck="false"></textarea></div>
+    <div class="ftr">Une seule ligne. Exécutée par root${cronTgt().type === "host" ? " sur l'hôte Proxmox" : " dans le conteneur"}.</div></form>`;
+  const f = m.querySelector("form"), F = n => f.elements[n];
+  const build = () => {  // préréglage → expression
+    const [hh, mm] = (F("time").value || "03:00").split(":").map(Number), p = F("preset").value;
+    const x = { "5min": "*/5 * * * *", hour: "0 * * * *", day: `${mm} ${hh} * * *`, week: `${mm} ${hh} * * ${F("dow").value}`,
+      month: `${mm} ${hh} ${F("dom").value} * *`, reboot: "@reboot" }[p];
+    if (x) F("sched").value = x;
+  };
+  const show = () => {
+    const p = F("preset").value;
+    f.querySelector("[data-f=time]").classList.toggle("hide", !["day", "week", "month"].includes(p));
+    f.querySelector("[data-f=dow]").classList.toggle("hide", p !== "week");
+    f.querySelector("[data-f=dom]").classList.toggle("hide", p !== "month");
+    const v = F("sched").value.trim().replace(/\s+/g, " ");
+    f.querySelector("#cronPreview").textContent = v ? (cronFr(v) || "Expression personnalisée : " + v) : "";
+  };
+  // ouverture : on retrouve le préréglage qui correspond à la tâche existante
+  if (job) {
+    F("sched").value = job.sched; F("cmd").value = job.cmd; F("preset").value = "custom";
+    const [mi, h, dom, , dow] = job.sched.split(" "), n = x => /^\d+$/.test(x || "");
+    if (job.sched === "*/5 * * * *") F("preset").value = "5min";
+    else if (job.sched === "0 * * * *") F("preset").value = "hour";
+    else if (job.sched === "@reboot") F("preset").value = "reboot";
+    else if (n(mi) && n(h)) {
+      F("time").value = `${h.padStart(2, "0")}:${mi.padStart(2, "0")}`;
+      if (dom === "*" && dow === "*") F("preset").value = "day";
+      else if (dom === "*" && /^[0-6]$/.test(dow)) { F("preset").value = "week"; F("dow").value = dow; }
+      else if (n(dom) && +dom <= 28 && dow === "*") { F("preset").value = "month"; F("dom").value = dom; }
+    }
+  } else { F("preset").value = "day"; build(); }
+  show();
+  f.addEventListener("input", e => {
+    if (e.target.name === "sched") F("preset").value = "custom";
+    else if (e.target.name !== "cmd") build();
+    show();
+  });
+  f.onsubmit = async e => {
+    e.preventDefault();
+    const body = { op: job ? "edit" : "add", sched: F("sched").value.trim(), cmd: F("cmd").value.trim() };
+    if (job) body.i = job.i;
+    if (await cronSave(body)) m.remove();
+  };
+  m.onclick = e => { if (e.target === m || e.target.closest("[data-close]")) m.remove(); };
+  document.body.appendChild(m); if (!job) F("cmd").focus();
 }
 async function runExec() {
   const command = $("#cmd").value.trim(); if (!command || S.execBusy) return;

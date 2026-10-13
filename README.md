@@ -9,6 +9,8 @@ Petite app web pour piloter ton Proxmox depuis le téléphone, avec Hermes inté
 - Apps : tes services web (Home Assistant, Jellyfin…) en grille d'icônes, détectés automatiquement, avec un point vert s'ils répondent ;
   renommer, changer l'adresse, masquer, ou ajouter tes propres liens (bouton Modifier)
 - Commandes : lancer une commande sur l'hôte, dans un conteneur ou une VM (agent QEMU requis) et voir le résultat
+- Tâches planifiées : la crontab de root de l'hôte et de chaque conteneur, en clair (« Tous les jours à 03:00 ») ;
+  ajouter, modifier, activer/désactiver, supprimer, lancer tout de suite
 - Hermes : il reçoit l'état du serveur à chaque message et peut proposer des actions, que tu valides d'un tap
 - Autorisations : Hermes te demande la permission avant ses commandes sensibles (Autoriser / Pour la session / Toujours / Refuser),
   et tu peux l'autoriser d'avance à démarrer, éteindre, redémarrer, snapshoter ou sauvegarder (bouton bouclier dans l'onglet Hermes)

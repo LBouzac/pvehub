@@ -4,6 +4,7 @@
 Aucune dépendance : uniquement la bibliothèque standard Python 3.9+.
 Configuration via variables d'environnement ou fichier .env à côté du script.
 """
+import base64
 import hashlib
 import hmac
 import json
@@ -429,6 +430,104 @@ def r_approval(d):
     return hermes("POST", f"/v1/runs/{run_id}/approval", body)
 
 
+# ---------------------------------------------------------------- tâches planifiées (crontab de root)
+# Un champ : *, nombres ou noms (jan, mon…), combinés par , - / — « m » ou « dow » ne passent pas
+_TOK = r"(?:\*|\d+|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|sun|mon|tue|wed|thu|fri|sat)"
+CRON_FIELD = rf"{_TOK}(?:[-/,]{_TOK})*"
+_SPECIAL = r"@(?:reboot|yearly|annually|monthly|weekly|daily|midnight|hourly)"
+RE_CRON_JOB = re.compile(rf"^\s*({_SPECIAL}|(?:{CRON_FIELD}\s+){{4}}{CRON_FIELD})\s+(\S.*)$", re.I)
+RE_CRON_SCHED = re.compile(rf"^({_SPECIAL}|(?:{CRON_FIELD} ){{4}}{CRON_FIELD})$", re.I)
+CRON_READ = "command -v crontab >/dev/null || { echo @@nocron; exit 0; }; crontab -l 2>/dev/null; true"
+
+
+def cron_target(d):
+    """Enveloppe un script sh pour l'hôte ou un conteneur."""
+    if d.get("type") in (None, "", "host"):
+        return lambda script: f"sh -c {shlex.quote(script)}"
+    _node, typ, vmid = guest_args(d)
+    if typ != "lxc":
+        raise ApiError(400, "Les tâches planifiées se gèrent sur l'hôte ou dans un conteneur")
+    return lambda script: f"pct exec {vmid} -- sh -c {shlex.quote(script)}"
+
+
+def parse_cron(text):
+    """Une entrée par ligne ; les tâches désactivées sont des lignes de tâche commentées par « # »."""
+    entries = []
+    for i, line in enumerate(text.split("\n")):
+        body, enabled = line, True
+        if line.lstrip().startswith("#"):
+            body, enabled = line.lstrip()[1:].lstrip(), False
+        m = RE_CRON_JOB.match(body)
+        if m:
+            sched = re.sub(r"\s+", " ", m.group(1))
+            entries.append({"i": i, "job": True, "enabled": enabled, "sched": sched, "cmd": m.group(2).rstrip()})
+        else:
+            entries.append({"i": i, "job": False, "raw": line})
+    return entries
+
+
+def cron_hash(text):
+    return hashlib.sha256(text.encode()).hexdigest()[:16]
+
+
+def read_cron(wrap):
+    if not EXEC_ENABLED:
+        raise ApiError(403, "Active la section Commandes pour gérer les tâches planifiées")
+    code, out = run_ssh(wrap(CRON_READ), timeout=20)
+    if code not in (0,) and "@@nocron" not in out:
+        raise ApiError(502, out.strip()[-300:] or "Lecture impossible")
+    if "@@nocron" in out:
+        return None
+    return out.rstrip("\n")
+
+
+def r_cron(q):
+    text = read_cron(cron_target(q))
+    if text is None:
+        return {"available": False}
+    return {"available": True, "hash": cron_hash(text),
+            "entries": [e for e in parse_cron(text) if e["job"]]}
+
+
+def r_cron_save(d):
+    wrap = cron_target(d)
+    text = read_cron(wrap)
+    if text is None:
+        raise ApiError(409, "cron n'est pas installé sur cette machine")
+    if d.get("hash") != cron_hash(text):
+        raise ApiError(409, "La crontab a changé entre-temps : recharge la liste")
+    lines = text.split("\n") if text else []
+    op = d.get("op")
+    if op in ("add", "edit"):
+        sched = re.sub(r"\s+", " ", str(d.get("sched", "")).strip())
+        cmd = str(d.get("cmd", "")).strip()
+        if not RE_CRON_SCHED.match(sched):
+            raise ApiError(400, "Planification invalide (5 champs, ex. « 0 3 * * * », ou @daily, @reboot…)")
+        if not cmd or len(cmd) > 1000 or "\n" in cmd or "\r" in cmd:
+            raise ApiError(400, "Commande vide, trop longue ou sur plusieurs lignes")
+        new = f"{sched} {cmd}"
+    i = d.get("i")
+    if op != "add":
+        if not isinstance(i, int) or not 0 <= i < len(lines) or not parse_cron(lines[i])[0]["job"]:
+            raise ApiError(400, "Tâche introuvable")
+    if op == "add":
+        lines.append(new)
+    elif op == "edit":
+        lines[i] = new if parse_cron(lines[i])[0]["enabled"] else "#" + new
+    elif op == "toggle":
+        e = parse_cron(lines[i])[0]
+        lines[i] = ("#" if e["enabled"] else "") + f"{e['sched']} {e['cmd']}"
+    elif op == "delete":
+        del lines[i]
+    else:
+        raise ApiError(400, "Demande invalide")
+    payload = base64.b64encode(("\n".join(lines) + "\n").encode()).decode()
+    code, out = run_ssh(wrap(f"echo {payload} | base64 -d | crontab -"), timeout=20)
+    if code != 0:
+        raise ApiError(502, "Écriture refusée : " + out.strip()[-300:])
+    return r_cron(d)
+
+
 # ---------------------------------------------------------------- mise à jour
 _upd = {"at": 0, "data": None}
 
@@ -809,6 +908,8 @@ ROUTES = {
     ("POST", "/api/chat"): Handler.chat,
     ("POST", "/api/chat/approval"): r_approval,
     ("POST", "/api/exec"): r_exec,
+    ("GET", "/api/cron"): r_cron,
+    ("POST", "/api/cron"): r_cron_save,
     ("GET", "/api/version"): r_version,
     ("POST", "/api/update"): r_update,
     ("GET", "/api/apps"): r_apps,

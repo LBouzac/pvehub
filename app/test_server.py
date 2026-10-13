@@ -32,4 +32,22 @@ for bad in ("javascript:alert(1)", "ftp://x", "http://", "x" * 400):
     except srv.ApiError:
         pass
 assert srv.clean_url(" http://192.168.1.1 ") == "http://192.168.1.1"
+# crontab : tâches actives/désactivées, commentaires et variables conservés
+CRON = """# m h  dom mon dow   command
+SHELL=/bin/bash
+*/5 * * * * /usr/local/bin/check.sh > /dev/null 2>&1
+#0 3 * * 1-5 apt update
+# Rappel : sauvegarde le dimanche
+@reboot   /root/start.sh
+30 2 1 jan,jul * echo semestre"""
+jobs = [e for e in srv.parse_cron(CRON) if e["job"]]
+assert [(e["i"], e["enabled"], e["sched"], e["cmd"]) for e in jobs] == [
+    (2, True, "*/5 * * * *", "/usr/local/bin/check.sh > /dev/null 2>&1"),
+    (3, False, "0 3 * * 1-5", "apt update"),
+    (5, True, "@reboot", "/root/start.sh"),
+    (6, True, "30 2 1 jan,jul *", "echo semestre")], jobs
+for ok in ("0 3 * * *", "*/15 * * * *", "@daily", "0 0 1 1 sun"):
+    assert srv.RE_CRON_SCHED.match(ok), ok
+for bad in ("0 3 * *", "m h dom mon dow", "@hier", "0 3 * * * *", "0 3 * * $(id)"):
+    assert not srv.RE_CRON_SCHED.match(bad), bad
 print("ok")
