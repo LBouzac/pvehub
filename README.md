@@ -71,3 +71,8 @@ Lancer en local : `PVE_URL=https://IP:8006 PVE_TOKEN='user@pve!id=secret' APP_PA
 ## Licence
 
 MIT — voir [LICENSE](LICENSE).
+
+Icône « réglages » adaptée de [Feather Icons](https://feathericons.com) (MIT, © Cole Bemis).
+
+PVE Hub est un projet indépendant, sans lien avec Proxmox Server Solutions GmbH ni avec Nous Research.
+Proxmox est une marque déposée de Proxmox Server Solutions GmbH.
