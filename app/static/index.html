@@ -1,0 +1,541 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0f1115">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>PVE Hub</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg">
+<link rel="apple-touch-icon" href="/icon.svg">
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--fg:#14161a;--mute:#6b7280;--line:#e5e7eb;--acc:#e5701a;--acc2:#2563eb;--ok:#16a34a;--bad:#dc2626;--warn:#d97706;--chip:#eef0f3;--r:14px}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1115;--card:#181b21;--fg:#e8eaed;--mute:#8b93a1;--line:#262a32;--chip:#22262e;--acc2:#60a5fa}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
+input,textarea,select{font:inherit;color:var(--fg);background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;width:100%}
+header{position:sticky;top:0;z-index:5;background:var(--bg);padding:calc(env(safe-area-inset-top) + 10px) 16px 8px;display:flex;align-items:center;gap:10px}
+header h1{font-size:20px;margin:0;flex:1}
+main{padding:0 16px calc(84px + env(safe-area-inset-bottom));max-width:760px;margin:0 auto}
+nav{position:fixed;bottom:0;left:0;right:0;z-index:6;display:flex;background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+nav button{flex:1;padding:10px 0 8px;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:12px;color:var(--mute)}
+nav button.on{color:var(--acc)}
+nav svg{width:22px;height:22px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin-bottom:12px}
+.row{display:flex;align-items:center;gap:10px}
+.grow{flex:1;min-width:0}
+.mute{color:var(--mute);font-size:13px}
+.t{font-weight:600}
+.ell{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bar{height:6px;background:var(--chip);border-radius:3px;overflow:hidden;margin-top:4px}
+.bar i{display:block;height:100%;background:var(--acc2);border-radius:3px;transition:width .4s}
+.bar i.hi{background:var(--warn)}.bar i.crit{background:var(--bad)}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:10px 16px;margin-top:10px}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--mute);flex:none}
+.dot.running,.dot.online{background:var(--ok)}.dot.paused{background:var(--warn)}
+.tag{font-size:11px;font-weight:600;padding:2px 6px;border-radius:6px;background:var(--chip);color:var(--mute)}
+.chips{display:flex;gap:8px;overflow-x:auto;padding:2px 0 10px}
+.chip{padding:6px 12px;border-radius:999px;background:var(--chip);font-size:13px;white-space:nowrap}
+.chip.on{background:var(--acc);color:#fff}
+.list .item{display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--line)}
+.list .item:last-child{border-bottom:0}
+.list{padding:0}
+.btns{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.btn{padding:10px 6px;border-radius:10px;background:var(--chip);font-size:13px;font-weight:600;text-align:center}
+.btn:disabled{opacity:.35}
+.btn.pri{background:var(--acc);color:#fff}
+.btn.danger{color:var(--bad)}
+.sm{padding:6px 10px;font-size:12px;border-radius:8px}
+h2{font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--mute);margin:18px 2px 8px}
+canvas{width:100%;height:110px;display:block}
+.legend{display:flex;gap:12px;font-size:12px;color:var(--mute);margin-bottom:4px}
+.legend b{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:4px}
+.sheet{position:fixed;inset:0;z-index:10;background:var(--bg);overflow-y:auto;transform:translateY(100%);transition:transform .25s ease}
+.sheet.open{transform:none}
+.back{font-size:15px;color:var(--acc);padding:6px 0}
+.toasts{position:fixed;left:12px;right:12px;top:calc(56px + env(safe-area-inset-top));z-index:20;display:flex;flex-direction:column;gap:6px;pointer-events:none;align-items:center}
+.toast{background:var(--fg);color:var(--bg);padding:10px 14px;border-radius:12px;font-size:14px;max-width:520px;box-shadow:0 4px 20px #0003}
+.modal{position:fixed;inset:0;z-index:30;background:#0007;display:flex;align-items:flex-end;justify-content:center}
+.modal .box{background:var(--card);width:100%;max-width:520px;border-radius:18px 18px 0 0;padding:20px 16px calc(16px + env(safe-area-inset-bottom))}
+.modal .box p{margin:0 0 16px}
+.modal .btns{grid-template-columns:1fr 1fr}
+/* chat */
+#chat{display:flex;flex-direction:column;gap:10px;padding-bottom:70px}
+.msg{max-width:88%;padding:10px 12px;border-radius:16px;word-wrap:break-word}
+.msg.user{align-self:flex-end;background:var(--acc);color:#fff;border-bottom-right-radius:4px}
+.msg.assistant{align-self:flex-start;background:var(--card);border:1px solid var(--line);border-bottom-left-radius:4px}
+.msg.note{align-self:center;font-size:12px;color:var(--mute);background:none;padding:2px}
+.msg pre{background:var(--chip);padding:8px;border-radius:8px;overflow-x:auto;font-size:12px;margin:6px 0}
+.msg code{font-size:13px;background:var(--chip);padding:1px 4px;border-radius:4px}
+.msg.user code{background:#fff3}
+.tools{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:4px}
+.tools span{font-size:11px;color:var(--mute);background:var(--chip);padding:2px 6px;border-radius:6px}
+.act{border:1px solid var(--acc);border-radius:10px;padding:8px 10px;margin:6px 0;display:flex;align-items:center;gap:8px}
+.act .grow{font-size:13px}
+.composer{position:fixed;left:0;right:0;bottom:calc(58px + env(safe-area-inset-bottom));z-index:6;background:var(--bg);padding:8px 12px;display:flex;gap:8px;max-width:760px;margin:0 auto}
+.composer textarea{resize:none;height:42px;max-height:120px;border-radius:21px;padding:10px 14px}
+.send{width:42px;height:42px;border-radius:50%;background:var(--acc);color:#fff;flex:none;display:grid;place-items:center}
+.typing::after{content:"▍";animation:b 1s steps(2) infinite}
+@keyframes b{50%{opacity:0}}
+.empty{text-align:center;color:var(--mute);padding:40px 10px}
+#login{max-width:360px;margin:20vh auto 0;padding:0 16px}
+.hide{display:none!important}
+</style>
+</head>
+<body>
+<div id="login" class="hide">
+  <h1 style="font-size:24px">PVE Hub</h1>
+  <form id="loginForm"><input id="pw" type="password" placeholder="Mot de passe" autocomplete="current-password" autofocus>
+  <button class="btn pri" style="width:100%;margin-top:10px;padding:12px">Se connecter</button></form>
+  <p id="loginErr" class="mute"></p>
+</div>
+
+<div id="app" class="hide">
+  <header><h1 id="title">Serveur</h1><span id="live" class="mute"></span></header>
+  <main>
+    <section id="v-dash"></section>
+    <section id="v-guests" class="hide">
+      <input id="search" type="search" placeholder="Rechercher (nom, ID)…" style="margin-bottom:10px">
+      <div class="chips" id="filters"></div>
+      <div class="card list" id="guestList"></div>
+    </section>
+    <section id="v-chat" class="hide">
+      <div id="chat"></div>
+      <div class="composer" id="composer">
+        <textarea id="prompt" rows="1" placeholder="Message à Hermes…"></textarea>
+        <button class="send" id="sendBtn" aria-label="Envoyer"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+      </div>
+    </section>
+  </main>
+  <nav>
+    <button data-v="dash" class="on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 7h.01M7 17h.01"/></svg>Serveur</button>
+    <button data-v="guests"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>Machines</button>
+    <button data-v="chat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a8 8 0 0 1-11.8 7L4 20l1.1-4.6A8 8 0 1 1 21 12z"/></svg>Hermes</button>
+  </nav>
+</div>
+
+<div class="sheet" id="sheet"></div>
+<div class="toasts" id="toasts"></div>
+
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const S = { ov: null, view: "dash", filter: "all", guest: null, chat: [], pending: [], busy: false };
+const store = { get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
+                set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} } };
+
+// ---------- formatting
+const fb = n => { n = +n || 0; const u = ["o","Ko","Mo","Go","To"]; let i = 0; while (n >= 1024 && i < 4) { n /= 1024; i++; } return (i < 2 ? n.toFixed(0) : n.toFixed(1)) + " " + u[i]; };
+const pct = (a, b) => b ? Math.min(100, a / b * 100) : 0;
+const up = s => { s = +s || 0; const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600); return d ? `${d} j ${h} h` : `${h} h ${Math.floor(s % 3600 / 60)} min`; };
+const bar = p => `<div class="bar"><i class="${p > 90 ? "crit" : p > 75 ? "hi" : ""}" style="width:${p.toFixed(1)}%"></i></div>`;
+const kind = t => t === "qemu" ? "VM" : "CT";
+const STATUS = { running: "En marche", stopped: "Arrêtée", paused: "En pause", online: "En ligne", offline: "Hors ligne" };
+
+// ---------- api
+async function api(path, opts = {}) {
+  const r = await fetch(path, { method: opts.method || (opts.body ? "POST" : "GET"),
+    headers: { "Content-Type": "application/json" }, credentials: "same-origin",
+    body: opts.body ? JSON.stringify(opts.body) : undefined });
+  if (r.status === 401) { showLogin(); throw new Error("Non connecté"); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+const qs = o => new URLSearchParams(o).toString();
+
+// ---------- ui helpers
+function toast(msg, ms = 3500) {
+  const el = document.createElement("div"); el.className = "toast"; el.textContent = msg;
+  $("#toasts").appendChild(el); setTimeout(() => el.remove(), ms); return el;
+}
+function confirmBox(text, okLabel = "Confirmer", danger = false) {
+  return new Promise(res => {
+    const m = document.createElement("div"); m.className = "modal";
+    m.innerHTML = `<div class="box"><p>${text}</p><div class="btns"><button class="btn" data-a="0">Annuler</button><button class="btn ${danger ? "danger" : "pri"}" data-a="1">${esc(okLabel)}</button></div></div>`;
+    m.onclick = e => { const a = e.target.dataset.a; if (a !== undefined || e.target === m) { m.remove(); res(a === "1"); } };
+    document.body.appendChild(m);
+  });
+}
+function promptBox(text, fields) {
+  return new Promise(res => {
+    const m = document.createElement("div"); m.className = "modal";
+    m.innerHTML = `<form class="box"><p>${text}</p>${fields.map(f => f.options
+      ? `<select name="${f.name}" style="margin-bottom:10px">${f.options.map(o => `<option>${esc(o)}</option>`).join("")}</select>`
+      : `<input name="${f.name}" placeholder="${esc(f.ph)}" value="${esc(f.value || "")}" style="margin-bottom:10px">`).join("")}
+      <div class="btns"><button type="button" class="btn" data-a="0">Annuler</button><button class="btn pri">Valider</button></div></form>`;
+    const form = m.querySelector("form");
+    form.onsubmit = e => { e.preventDefault(); const v = Object.fromEntries(new FormData(form)); m.remove(); res(v); };
+    m.onclick = e => { if (e.target.dataset.a === "0" || e.target === m) { m.remove(); res(null); } };
+    document.body.appendChild(m); m.querySelector("input,select")?.focus();
+  });
+}
+
+// Suit une tâche Proxmox jusqu'à la fin ; renvoie "OK" ou le message d'erreur.
+async function track(res, label) {
+  const t = toast(`⏳ ${label}…`, 600000);
+  try {
+    for (let i = 0; i < 900; i++) {
+      await new Promise(r => setTimeout(r, i < 5 ? 1000 : 2500));
+      const s = await api("/api/task?" + qs({ node: res.node, upid: res.upid }));
+      if (s.status === "stopped") {
+        t.remove(); const ok = s.exitstatus === "OK";
+        toast(`${ok ? "✅" : "❌"} ${label}${ok ? "" : " : " + s.exitstatus}`, 5000);
+        refresh(); if (S.guest) loadGuestExtras();
+        return s.exitstatus;
+      }
+    }
+    t.remove(); return "toujours en cours";
+  } catch (e) { t.remove(); toast("❌ " + e.message); return e.message; }
+}
+
+// ---------- charts (canvas, sans lib)
+function chart(cv, rows, series, { max, fmt = v => v.toFixed(0) + " %" } = {}) {
+  const dpr = devicePixelRatio || 1, w = cv.clientWidth, h = cv.clientHeight;
+  cv.width = w * dpr; cv.height = h * dpr;
+  const c = cv.getContext("2d"); c.scale(dpr, dpr);
+  const css = getComputedStyle(document.documentElement);
+  rows = rows.filter(r => series.some(s => Number.isFinite(s.v(r))));
+  if (rows.length < 2) { c.fillStyle = css.getPropertyValue("--mute"); c.font = "12px system-ui"; c.fillText("Pas encore de données", 4, h / 2); return; }
+  const top = max ?? Math.max(1, ...rows.flatMap(r => series.map(s => s.v(r) || 0))) * 1.15;
+  const pad = 16, x = i => i / (rows.length - 1) * w, y = v => h - pad - (Math.min(v, top) / top) * (h - pad - 4);
+  c.strokeStyle = css.getPropertyValue("--line"); c.lineWidth = 1;
+  [0, .5, 1].forEach(f => { c.beginPath(); c.moveTo(0, y(top * f)); c.lineTo(w, y(top * f)); c.stroke(); });
+  c.fillStyle = css.getPropertyValue("--mute"); c.font = "11px system-ui"; c.fillText(fmt(top), 2, 12);
+  for (const s of series) {
+    c.beginPath(); c.strokeStyle = s.color; c.lineWidth = 1.8; c.lineJoin = "round";
+    rows.forEach((r, i) => { const v = s.v(r) || 0; i ? c.lineTo(x(i), y(v)) : c.moveTo(x(i), y(v)); });
+    c.stroke(); c.lineTo(w, h - pad); c.lineTo(0, h - pad); c.closePath();
+    c.globalAlpha = .12; c.fillStyle = s.color; c.fill(); c.globalAlpha = 1;
+  }
+}
+const ORANGE = "#e5701a", BLUE = "#3b82f6", GREEN = "#16a34a";
+const cpuS = { color: ORANGE, v: r => r.cpu * 100 };
+const memS = { color: BLUE, v: r => pct(r.mem ?? r.memused, r.maxmem ?? r.memtotal) };
+const netFmt = v => fb(v) + "/s";
+
+// ---------- vues
+function setView(v) {
+  S.view = v;
+  document.querySelectorAll("nav button").forEach(b => b.classList.toggle("on", b.dataset.v === v));
+  ["dash", "guests", "chat"].forEach(k => $("#v-" + k).classList.toggle("hide", k !== v));
+  $("#title").textContent = { dash: "Serveur", guests: "Machines", chat: "Hermes" }[v];
+  if (v === "chat") { renderChat(); scrollChat(); }
+  render();
+}
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => setView(b.dataset.v));
+
+function render() {
+  if (!S.ov) return;
+  if (S.view === "dash") renderDash();
+  if (S.view === "guests") renderGuests();
+}
+
+function renderDash() {
+  const { nodes, guests, storage } = S.ov;
+  const real = guests.filter(g => !g.template), run = real.filter(g => g.status === "running").length;
+  let h = `<div class="card row"><div class="grow"><div class="t" style="font-size:22px">${run}<span class="mute" style="font-size:15px"> / ${real.length}</span></div><div class="mute">machines en marche</div></div>
+    <button class="btn sm" onclick="setView('guests')">Voir</button></div>`;
+  for (const n of nodes) {
+    const cpu = (n.cpu || 0) * 100, mem = pct(n.mem, n.maxmem), disk = pct(n.disk, n.maxdisk);
+    h += `<div class="card"><div class="row"><span class="dot ${n.status}"></span><div class="grow t">${esc(n.node)}</div><span class="mute">${n.status === "online" ? "depuis " + up(n.uptime) : STATUS[n.status] || n.status}</span></div>
+      <div class="stats">
+        <div><div class="mute">CPU · ${n.maxcpu || "?"} cœurs</div><div class="t">${cpu.toFixed(0)} %</div>${bar(cpu)}</div>
+        <div><div class="mute">RAM</div><div class="t">${fb(n.mem)} <span class="mute">/ ${fb(n.maxmem)}</span></div>${bar(mem)}</div>
+        <div><div class="mute">Disque système</div><div class="t">${fb(n.disk)} <span class="mute">/ ${fb(n.maxdisk)}</span></div>${bar(disk)}</div>
+      </div>
+      <div style="margin-top:14px"><div class="legend"><span><b style="background:${ORANGE}"></b>CPU</span><span><b style="background:${BLUE}"></b>RAM</span><span class="grow"></span><span>dernière heure</span></div>
+      <canvas data-node="${esc(n.node)}"></canvas></div></div>`;
+  }
+  const st = storage.filter(s => s.status === "available" && s.maxdisk);
+  if (st.length) {
+    h += `<h2>Stockage</h2><div class="card">` + st.map(s => { const p = pct(s.disk, s.maxdisk);
+      return `<div style="margin-bottom:10px"><div class="row"><span class="grow">${esc(s.storage)} <span class="mute">· ${esc(s.node)}</span></span><span class="mute">${fb(s.disk)} / ${fb(s.maxdisk)}</span></div>${bar(p)}</div>`; }).join("") + `</div>`;
+  }
+  $("#v-dash").innerHTML = h;
+  loadNodeCharts();
+}
+
+let nodeRrdAt = 0, nodeRrd = {};
+async function loadNodeCharts(force) {
+  const draw = () => document.querySelectorAll("canvas[data-node]").forEach(cv => chart(cv, nodeRrd[cv.dataset.node] || [], [cpuS, memS], { max: 100 }));
+  draw();
+  if (!force && Date.now() - nodeRrdAt < 60000) return;
+  nodeRrdAt = Date.now();
+  await Promise.all(S.ov.nodes.map(async n => { try { nodeRrd[n.node] = (await api("/api/rrd?" + qs({ node: n.node }))).data; } catch {} }));
+  draw();
+}
+
+const FILTERS = [["all", "Tout"], ["running", "En marche"], ["stopped", "Arrêtées"], ["qemu", "VM"], ["lxc", "Conteneurs"]];
+function renderGuests() {
+  $("#filters").innerHTML = FILTERS.map(([k, l]) => `<button class="chip ${S.filter === k ? "on" : ""}" data-f="${k}">${l}</button>`).join("");
+  const q = $("#search").value.trim().toLowerCase();
+  const list = S.ov.guests.filter(g => {
+    if (S.filter === "running" || S.filter === "stopped") { if (g.status !== S.filter) return false; }
+    else if (S.filter !== "all" && g.type !== S.filter) return false;
+    return !q || String(g.vmid).includes(q) || (g.name || "").toLowerCase().includes(q);
+  }).sort((a, b) => (b.status === "running") - (a.status === "running") || a.vmid - b.vmid);
+  $("#guestList").innerHTML = list.length ? list.map(g => {
+    const on = g.status === "running", cpu = (g.cpu || 0) * 100, mem = pct(g.mem, g.maxmem);
+    return `<button class="item" style="width:100%;text-align:left" data-id="${esc(g.id)}">
+      <span class="dot ${g.status}"></span>
+      <div class="grow"><div class="row"><span class="t ell">${esc(g.name || "sans nom")}</span><span class="tag">${kind(g.type)} ${g.vmid}</span>${g.template ? '<span class="tag">modèle</span>' : ""}</div>
+      <div class="mute">${on ? `CPU ${cpu.toFixed(0)} % · RAM ${fb(g.mem)} / ${fb(g.maxmem)}` : STATUS[g.status] || g.status}${S.ov.nodes.length > 1 ? " · " + esc(g.node) : ""}</div>
+      ${on ? bar(mem) : ""}</div></button>`;
+  }).join("") : `<div class="empty">Aucune machine</div>`;
+}
+$("#filters").onclick = e => { const f = e.target.dataset.f; if (f) { S.filter = f; renderGuests(); } };
+$("#search").oninput = renderGuests;
+$("#guestList").onclick = e => { const it = e.target.closest("[data-id]"); if (it) openGuest(it.dataset.id); };
+
+// ---------- détail machine
+const findGuest = id => S.ov?.guests.find(g => g.id === id);
+let guestRrd = [];
+function openGuest(id) {
+  S.guest = id; guestRrd = [];
+  $("#sheet").classList.add("open"); history.pushState({ g: id }, "");
+  renderGuest(); loadGuestExtras();
+}
+function closeGuest() { S.guest = null; $("#sheet").classList.remove("open"); }
+addEventListener("popstate", () => { if (S.guest) closeGuest(); });
+
+function renderGuest() {
+  const g = findGuest(S.guest); if (!g) return;
+  const on = g.status === "running", cpu = (g.cpu || 0) * 100;
+  const keepSnaps = $("#snaps")?.innerHTML, keepBk = $("#bks")?.innerHTML;
+  $("#sheet").innerHTML = `<header><button class="back" onclick="history.back()">‹ Machines</button></header><main>
+    <div class="row" style="margin:4px 0 14px"><span class="dot ${g.status}"></span><div class="grow"><div class="t ell" style="font-size:20px">${esc(g.name || "sans nom")}</div>
+      <div class="mute">${kind(g.type)} ${g.vmid} · ${esc(g.node)} · ${STATUS[g.status] || g.status}${on ? " depuis " + up(g.uptime) : ""}</div></div></div>
+    <div class="btns">
+      <button class="btn pri" data-p="start" ${on ? "disabled" : ""}>Démarrer</button>
+      <button class="btn" data-p="shutdown" ${on ? "" : "disabled"}>Éteindre</button>
+      <button class="btn" data-p="reboot" ${on ? "" : "disabled"}>Redémarrer</button>
+      <button class="btn danger" data-p="stop" ${on ? "" : "disabled"}>Forcer</button>
+    </div>
+    <div class="card" style="margin-top:12px"><div class="stats" style="margin-top:0">
+      <div><div class="mute">CPU · ${g.maxcpu} cœur${g.maxcpu > 1 ? "s" : ""}</div><div class="t">${on ? cpu.toFixed(0) + " %" : "—"}</div>${bar(on ? cpu : 0)}</div>
+      <div><div class="mute">RAM</div><div class="t">${on ? fb(g.mem) : "—"} <span class="mute">/ ${fb(g.maxmem)}</span></div>${bar(on ? pct(g.mem, g.maxmem) : 0)}</div>
+      <div><div class="mute">Disque</div><div class="t">${g.disk ? fb(g.disk) : "—"} <span class="mute">/ ${fb(g.maxdisk)}</span></div>${bar(pct(g.disk, g.maxdisk))}</div>
+      <div><div class="mute">Réseau total</div><div class="t">↓ ${fb(g.netin)} · ↑ ${fb(g.netout)}</div></div>
+    </div></div>
+    <div class="card"><div class="legend"><span><b style="background:${ORANGE}"></b>CPU</span><span><b style="background:${BLUE}"></b>RAM</span><span class="grow"></span><span>dernière heure</span></div><canvas id="cvUse"></canvas>
+      <div class="legend" style="margin-top:12px"><span><b style="background:${GREEN}"></b>Entrant</span><span><b style="background:${ORANGE}"></b>Sortant</span></div><canvas id="cvNet"></canvas></div>
+    <button class="btn" style="width:100%" id="askHermes">💬 Demander à Hermes</button>
+    <h2 class="row"><span class="grow">Snapshots</span><button class="btn sm pri" id="newSnap">+ Snapshot</button></h2>
+    <div class="card list" id="snaps">${keepSnaps || '<div class="item mute">Chargement…</div>'}</div>
+    <h2 class="row"><span class="grow">Sauvegardes</span><button class="btn sm pri" id="newBk">Sauvegarder</button></h2>
+    <div class="card list" id="bks">${keepBk || '<div class="item mute">Chargement…</div>'}</div>
+  </main>`;
+  drawGuestCharts();
+  $("#askHermes").onclick = () => { history.back(); setView("chat"); $("#prompt").value = `Analyse l'état de ${kind(g.type) === "VM" ? "la VM" : "du conteneur"} ${g.vmid} (${g.name}). Tout va bien ?`; $("#prompt").focus(); };
+  $("#newSnap").onclick = () => newSnapshot(g);
+  $("#newBk").onclick = () => newBackup(g);
+}
+function drawGuestCharts() {
+  const a = $("#cvUse"), b = $("#cvNet"); if (!a) return;
+  chart(a, guestRrd, [cpuS, memS], { max: 100 });
+  chart(b, guestRrd, [{ color: GREEN, v: r => r.netin }, { color: ORANGE, v: r => r.netout }], { fmt: netFmt });
+}
+$("#sheet").addEventListener("click", async e => {
+  const p = e.target.closest("[data-p]")?.dataset.p; if (!p) return;
+  const g = findGuest(S.guest); await runAction({ action: p, node: g.node, type: g.type, vmid: g.vmid });
+});
+
+async function loadGuestExtras() {
+  const g = findGuest(S.guest); if (!g) return;
+  const a = { node: g.node, type: g.type, vmid: g.vmid };
+  api("/api/rrd?" + qs(a)).then(r => { guestRrd = r.data; drawGuestCharts(); }).catch(() => {});
+  api("/api/snapshots?" + qs(a)).then(r => {
+    if (!$("#snaps")) return;
+    $("#snaps").innerHTML = r.items.length ? r.items.map(s => `<div class="item"><div class="grow"><div class="t ell">${esc(s.name)}</div>
+      <div class="mute ell">${s.snaptime ? new Date(s.snaptime * 1000).toLocaleString("fr-FR") : ""}${s.description ? " · " + esc(s.description.trim()) : ""}</div></div>
+      <button class="btn sm" data-snap="${esc(s.name)}" data-do="rollback">Restaurer</button><button class="btn sm danger" data-snap="${esc(s.name)}" data-do="del">✕</button></div>`).join("")
+      : '<div class="item mute">Aucun snapshot</div>';
+  }).catch(e => { if ($("#snaps")) $("#snaps").innerHTML = `<div class="item mute">${esc(e.message)}</div>`; });
+  api("/api/backups?" + qs(a)).then(r => {
+    if (!$("#bks")) return;
+    $("#bks").dataset.storages = JSON.stringify(r.storages);
+    $("#bks").innerHTML = r.items.length ? r.items.map(b => `<div class="item"><div class="grow"><div class="t">${new Date(b.ctime * 1000).toLocaleString("fr-FR")}</div>
+      <div class="mute ell">${esc(b.storage)} · ${fb(b.size)}${b.notes ? " · " + esc(b.notes) : ""}${b.protected ? " · 🔒" : ""}</div></div>
+      <button class="btn sm" data-vol="${esc(b.volid)}">Restaurer</button></div>`).join("")
+      : `<div class="item mute">${r.storages.length ? "Aucune sauvegarde" : "Aucun stockage de sauvegarde sur ce nœud"}</div>`;
+  }).catch(e => { if ($("#bks")) $("#bks").innerHTML = `<div class="item mute">${esc(e.message)}</div>`; });
+}
+$("#sheet").addEventListener("click", async e => {
+  const g = findGuest(S.guest); if (!g) return;
+  const sb = e.target.closest("[data-snap]"), vb = e.target.closest("[data-vol]");
+  if (sb) await runAction({ action: sb.dataset.do === "del" ? "snapdelete" : "rollback", node: g.node, type: g.type, vmid: g.vmid, name: sb.dataset.snap });
+  if (vb) await runAction({ action: "restore", node: g.node, type: g.type, vmid: g.vmid, volid: vb.dataset.vol });
+});
+
+async function newSnapshot(g) {
+  const d = new Date(), def = "pvehub-" + d.toISOString().slice(0, 16).replace(/[-:T]/g, "").replace(/^(\d{8})/, "$1-");
+  const v = await promptBox(`Nouveau snapshot de <b>${esc(g.name)}</b>`, [{ name: "name", ph: "Nom", value: def }, { name: "description", ph: "Description (facultatif)" }]);
+  if (v) await runAction({ action: "snapshot", node: g.node, type: g.type, vmid: g.vmid, ...v }, true);
+}
+async function newBackup(g) {
+  let stores = []; try { stores = JSON.parse($("#bks").dataset.storages || "[]"); } catch {}
+  if (!stores.length) return toast("Aucun stockage de sauvegarde disponible");
+  const v = await promptBox(`Sauvegarder <b>${esc(g.name)}</b> maintenant`, [{ name: "storage", options: stores }, { name: "mode", options: ["snapshot", "suspend", "stop"] }]);
+  if (v) await runAction({ action: "backup", node: g.node, type: g.type, vmid: g.vmid, ...v }, true);
+}
+
+// ---------- actions (communes aux boutons et à Hermes)
+const ACT = {
+  start:     { label: "Démarrer", run: a => api("/api/power", { body: { ...a, action: "start" } }) },
+  shutdown:  { label: "Éteindre", run: a => api("/api/power", { body: { ...a, action: "shutdown" } }) },
+  reboot:    { label: "Redémarrer", run: a => api("/api/power", { body: { ...a, action: "reboot" } }) },
+  stop:      { label: "Forcer l'arrêt de", danger: true, warn: "Équivaut à débrancher la prise : risque de perte de données.", run: a => api("/api/power", { body: { ...a, action: "stop" } }) },
+  snapshot:  { label: "Snapshot de", run: a => api("/api/snapshot", { body: a }) },
+  rollback:  { label: "Revenir au snapshot", danger: true, warn: "L'état actuel sera perdu.", run: a => api("/api/snapshot/rollback", { body: a }) },
+  snapdelete:{ label: "Supprimer le snapshot", danger: true, run: a => api("/api/snapshot/delete", { body: a }) },
+  backup:    { label: "Sauvegarder", run: a => api("/api/backup", { body: a }) },
+  restore:   { label: "Restaurer la sauvegarde sur", danger: true, warn: "La machine sera écrasée par la sauvegarde. Elle doit être arrêtée.", run: a => api("/api/restore", { body: a }) },
+};
+function describe(a) {
+  const d = ACT[a.action], g = S.ov?.guests.find(x => x.vmid == a.vmid);
+  const who = `${kind(a.type)} ${a.vmid}${g?.name ? " « " + g.name + " »" : ""}`;
+  return `${d?.label || a.action} ${who}${a.name && a.action !== "snapshot" ? " (" + a.name + ")" : a.name ? " « " + a.name + " »" : ""}`;
+}
+// Retourne le résultat texte (pour l'historique Hermes) ou null si annulé.
+async function runAction(a, skipConfirm) {
+  const d = ACT[a.action]; if (!d) { toast("Action inconnue : " + a.action); return null; }
+  const g = S.ov?.guests.find(x => x.vmid == a.vmid);
+  a = { node: g?.node, type: g?.type, ...a };
+  if (!a.node || !a.type) { toast("Machine introuvable : " + a.vmid); return null; }
+  const text = describe(a);
+  if (!skipConfirm && !await confirmBox(`<b>${esc(text)}</b> ?${d.warn ? `<br><span class="mute">${esc(d.warn)}</span>` : ""}`, "Confirmer", d.danger)) return null;
+  try { return await track(await d.run(a), text); }
+  catch (e) { toast("❌ " + e.message); return e.message; }
+}
+
+// ---------- chat Hermes
+S.chat = store.get("pvehub.chat", []);
+function md(src) {
+  const parts = src.split(/```(\w*)\n?([\s\S]*?)(?:```|$)/g);
+  let out = "";
+  for (let i = 0; i < parts.length; i += 3) {
+    out += esc(parts[i]).replace(/`([^`\n]+)`/g, "<code>$1</code>").replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>")
+      .replace(/^#{1,4} (.+)$/gm, "<b>$1</b>").replace(/^[-*] /gm, "• ").replace(/\n/g, "<br>");
+    if (i + 2 < parts.length) {
+      const lang = parts[i + 1], code = parts[i + 2];
+      if (lang === "pvehub") {
+        try { const a = JSON.parse(code); out += `<div class="act"><span class="grow">⚡ ${esc(describe(a))}</span><button class="btn sm pri" data-act='${esc(JSON.stringify(a))}'>Exécuter</button></div>`; }
+        catch { out += parts[i + 2].trim() ? `<div class="act"><span class="grow mute">Action en cours de rédaction…</span></div>` : ""; }
+      } else out += `<pre>${esc(code)}</pre>`;
+    }
+  }
+  return out;
+}
+function msgHtml(m) {
+  if (m.role === "note") return `<div class="msg note">${esc(m.content)}</div>`;
+  const tools = m.tools?.length ? `<div class="tools">${m.tools.map(t => `<span>🔧 ${esc(t)}</span>`).join("")}</div>` : "";
+  return `<div class="msg ${m.role}">${tools}${m.role === "user" ? esc(m.content).replace(/\n/g, "<br>") : md(m.content)}${m.typing ? '<span class="typing"></span>' : ""}</div>`;
+}
+function renderChat() {
+  if (!S.ov?.hermes) { $("#chat").innerHTML = `<div class="empty">Hermes n'est pas configuré.<br>Renseigne HERMES_URL et HERMES_KEY dans le fichier .env.</div>`; $("#composer").classList.add("hide"); return; }
+  $("#composer").classList.remove("hide");
+  $("#chat").innerHTML = S.chat.length ? S.chat.map(msgHtml).join("") + (S.chat.length ? `<button class="chip" style="align-self:center" id="clearChat">Nouvelle conversation</button>` : "")
+    : `<div class="empty">Pose une question à Hermes sur ton serveur.<br><br>
+      <button class="chip" data-ex="Comment va mon serveur ?">Comment va mon serveur ?</button><br><br>
+      <button class="chip" data-ex="Quelle machine consomme le plus ?">Quelle machine consomme le plus ?</button></div>`;
+}
+const scrollChat = () => requestAnimationFrame(() => scrollTo(0, document.body.scrollHeight));
+$("#chat").onclick = async e => {
+  if (e.target.id === "clearChat") { if (await confirmBox("Effacer la conversation ?")) { S.chat = []; S.pending = []; store.set("pvehub.chat", []); renderChat(); } return; }
+  if (e.target.dataset.ex) { $("#prompt").value = e.target.dataset.ex; return send(); }
+  const b = e.target.closest("[data-act]"); if (!b) return;
+  let a; try { a = JSON.parse(b.dataset.act); } catch { return; }
+  const res = await runAction(a); if (res === null) return;
+  const note = `[PVE Hub] ${describe(a)} → ${res === "OK" ? "terminé avec succès" : res}`;
+  S.pending.push(note); S.chat.push({ role: "note", content: note.replace("[PVE Hub] ", "") });
+  store.set("pvehub.chat", S.chat); renderChat(); scrollChat();
+};
+$("#prompt").addEventListener("input", e => { e.target.style.height = "42px"; e.target.style.height = Math.min(120, e.target.scrollHeight) + "px"; });
+$("#prompt").addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && !matchMedia("(pointer:coarse)").matches) { e.preventDefault(); send(); } });
+$("#sendBtn").onclick = send;
+
+async function send() {
+  const text = $("#prompt").value.trim(); if (!text || S.busy) return;
+  $("#prompt").value = ""; $("#prompt").style.height = "42px";
+  const content = (S.pending.length ? S.pending.join("\n") + "\n\n" : "") + text; S.pending = [];
+  S.chat.push({ role: "user", content: text, sent: content });
+  const reply = { role: "assistant", content: "", tools: [], typing: true }; S.chat.push(reply);
+  S.busy = true; renderChat(); scrollChat();
+  const history = S.chat.filter(m => m !== reply && (m.role === "user" || m.role === "assistant")).map(m => ({ role: m.role, content: m.sent || m.content }));
+  let last = 0;
+  const paint = force => { if (!force && Date.now() - last < 80) return; last = Date.now();
+    const els = document.querySelectorAll("#chat .msg"); const el = els[els.length - 1];
+    if (el && S.view === "chat") { el.outerHTML = msgHtml(reply); const nearBottom = innerHeight + scrollY > document.body.scrollHeight - 200; if (nearBottom) scrollChat(); } };
+  try {
+    const r = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin", body: JSON.stringify({ messages: history }) });
+    if (r.status === 401) { showLogin(); throw new Error("Non connecté"); }
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
+    const rd = r.body.getReader(), dec = new TextDecoder(); let buf = "";
+    for (;;) {
+      const { value, done } = await rd.read(); if (done) break;
+      buf += dec.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+      let i;
+      while ((i = buf.indexOf("\n\n")) >= 0) {
+        const block = buf.slice(0, i); buf = buf.slice(i + 2);
+        let ev = "message", data = "";
+        for (const line of block.split("\n")) {
+          if (line.startsWith(":")) continue;
+          if (line.startsWith("event:")) ev = line.slice(6).trim();
+          else if (line.startsWith("data:")) data += line.slice(5).trimStart();
+        }
+        if (!data || data === "[DONE]") continue;
+        let j; try { j = JSON.parse(data); } catch { continue; }
+        if (ev === "hermes.tool.progress") {
+          const t = j.tool || j.name || j.tool_name || j.label || "outil";
+          if (!reply.tools.includes(t)) reply.tools.push(t);
+        } else if (j.error) throw new Error(j.error.message || j.error);
+        else reply.content += j.choices?.[0]?.delta?.content || "";
+        paint();
+      }
+    }
+    if (!reply.content) reply.content = "_(réponse vide)_";
+  } catch (e) {
+    reply.content += (reply.content ? "\n\n" : "") + "⚠️ " + e.message;
+  }
+  reply.typing = false; S.busy = false; paint(true);
+  store.set("pvehub.chat", S.chat.slice(-80));
+}
+
+// ---------- boucle de rafraîchissement (pause quand l'app est cachée)
+let timer;
+async function refresh() {
+  try {
+    S.ov = await api("/api/overview");
+    $("#live").textContent = "● en direct"; $("#live").style.color = "var(--ok)";
+    if (S.view !== "chat") render();
+    if (S.guest) renderGuest();
+  } catch (e) {
+    if (e.message !== "Non connecté") { $("#live").textContent = "● hors ligne"; $("#live").style.color = "var(--bad)"; }
+  }
+}
+function loop() { clearInterval(timer); if (document.visibilityState === "visible") { refresh(); timer = setInterval(refresh, 5000); } }
+document.addEventListener("visibilitychange", loop);
+setInterval(() => { if (document.visibilityState === "visible" && S.view === "dash") loadNodeCharts(); if (S.guest) api("/api/rrd?" + qs((({ node, type, vmid }) => ({ node, type, vmid }))(findGuest(S.guest) || {}))).then(r => { guestRrd = r.data; drawGuestCharts(); }).catch(() => {}); }, 60000);
+addEventListener("resize", () => { loadNodeCharts(); drawGuestCharts(); });
+
+// ---------- connexion
+function showLogin() { clearInterval(timer); $("#app").classList.add("hide"); $("#login").classList.remove("hide"); }
+$("#loginForm").onsubmit = async e => {
+  e.preventDefault(); $("#loginErr").textContent = "";
+  try { await api("/api/login", { body: { password: $("#pw").value } }); $("#pw").value = ""; start(); }
+  catch (err) { $("#loginErr").textContent = err.message; }
+};
+async function start() {
+  try { S.ov = await api("/api/overview"); } catch (e) { if (e.message === "Non connecté") return; }
+  $("#login").classList.add("hide"); $("#app").classList.remove("hide");
+  render(); loop();
+}
+start();
+</script>
+</body>
+</html>
