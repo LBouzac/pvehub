@@ -6,7 +6,7 @@ self.addEventListener("push", e => {
   let d = {};
   try { d = e.data.json(); } catch { d = { body: e.data ? e.data.text() : "" }; }
   e.waitUntil(self.registration.showNotification(d.title || "PVE Hub", {
-    body: d.body || "", tag: d.tag || undefined, icon: "/icon.png?v=2", data: { url: d.url || "/" },
+    body: d.body || "", tag: d.tag || undefined, icon: "/icon.png?v=3", data: { url: d.url || "/" },
   }));
 });
 
