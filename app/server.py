@@ -1130,9 +1130,11 @@ def wait_pve_task(node, upid, timeout=1800):
 
 
 def job_log(job, line):
-    line = RE_ANSI.sub("", line).rstrip("\n").split("\r")[-1].strip()  # couleurs et animations du terminal retirées
-    if not line:
+    # couleurs et animations retirées ; une ligne réécrite par « \r » garde son dernier texte non vide
+    parts = [p.strip() for p in RE_ANSI.sub("", line).rstrip("\n").split("\r") if p.strip()]
+    if not parts:
         return
+    line = parts[-1]
     job["log"] = (job["log"] + [line])[-300:]
     m = re.search(r"(https?://\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?\S*)", line)
     if m and "github" not in line:
@@ -1144,12 +1146,20 @@ def job_log(job, line):
 
 def install_community(job, slug, store, tstore, bridge):
     url = f"https://raw.githubusercontent.com/{CS_REPO}/main/ct/{slug}.sh"
-    # mode=default + PHS_SILENT=1 : « installation par défaut » sans aucune question ; TERM=dumb : pas de menu whiptail
-    script = (f"export TERM=dumb PHS_SILENT=1 mode=default var_container_storage={store} var_template_storage={tstore} "
-              f"var_brg={bridge}; bash -c \"$(curl -fsSL {url})\"")
+    # mode=default + PHS_SILENT=1 : « installation par défaut », sans question ; les menus whiptail sont aussi
+    # évités faute de vrai terminal (stdin fermé). TERM=xterm et non « dumb » : le script commence par « clear »,
+    # qui échoue avec TERM=dumb et arrête tout (code 1).
+    script = (f"export TERM=xterm-256color PHS_SILENT=1 mode=default var_container_storage={store} "
+              f"var_template_storage={tstore} var_brg={bridge}; bash -c \"$(curl -fsSL {url})\"")
     job_log(job, f"$ {script}")
+    started = int(time.time())
     code = run_ssh_stream(f"bash -c {shlex.quote(script)}", lambda l: job_log(job, l), timeout=2700)
     if code != 0:
+        # le script écrit un journal détaillé sur l'hôte : on en montre la fin pour voir la vraie cause
+        _c, out = run_ssh(f"f=$(find /tmp -maxdepth 1 -name 'build-*.log' -newermt @{started - 5} 2>/dev/null | sort | tail -1); "
+                          "[ -n \"$f\" ] && echo \"— fin de $f —\" && tail -n 25 \"$f\"", timeout=15)
+        for l in out.splitlines():
+            job_log(job, l)
         raise ApiError(502, f"Le script s'est arrêté avec le code {code}")
 
 
