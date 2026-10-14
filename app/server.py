@@ -237,7 +237,8 @@ Actions possibles : start, shutdown (arrêt propre), stop (arrêt forcé), reboo
 
 # ---------------------------------------------------------------- Auth
 
-# data/auth.json : {"gen": n, "pw": "pbkdf2$…" (remplace APP_PASSWORD une fois changé dans l'app), "log": [...], "warned": t}
+# data/auth.json : {"pw": "pbkdf2$…" (remplace APP_PASSWORD une fois changé dans l'app),
+#                    "sessions": {id: {t, seen, ip, who, ua}}, "log": [...], "warned": t}
 AUTH_FILE = os.path.join(DATA_DIR, "auth.json")
 _auth_lock = threading.Lock()
 
@@ -263,29 +264,54 @@ def auth_enabled():
     return bool(APP_PASSWORD or auth_state().get("pw"))
 
 
-def _sign(exp, gen):
-    return hmac.new(APP_SECRET, f"{exp}.{gen}".encode(), hashlib.sha256).hexdigest()
+def _sign(exp, sid):
+    return hmac.new(APP_SECRET, f"{exp}.{sid}".encode(), hashlib.sha256).hexdigest()
 
 
-def make_session():
-    exp, gen = int(time.time()) + SESSION_DAYS * 86400, auth_state().get("gen", 0)
-    return f"{exp}.{gen}.{_sign(exp, gen)}"
-
-
-def valid_session(value):
-    # « gen » change quand on déconnecte tous les appareils ou change le mot de passe : les anciens cookies meurent
-    try:
-        exp, gen, sig = value.split(".")
-        return (hmac.compare_digest(sig, _sign(exp, gen)) and int(exp) > time.time()
-                and int(gen) == auth_state().get("gen", 0))
-    except (ValueError, AttributeError):
-        return False
-
-
-def bump_gen(**changes):
+def make_session(ip="", who="", ua=""):
+    """Chaque connexion a son identifiant, gardé côté serveur : on peut la couper seule depuis Réglages → Sécurité."""
+    now = int(time.time())
+    sid, exp = secrets.token_hex(8), now + SESSION_DAYS * 86400
     with _auth_lock:
         st = auth_state()
-        st.update(changes, gen=st.get("gen", 0) + 1)
+        ses = {k: v for k, v in st.get("sessions", {}).items() if v["t"] + SESSION_DAYS * 86400 > now}  # expirées
+        ses[sid] = {"t": now, "seen": now, "ip": ip[:64], "who": who[:80], "ua": ua[:120]}
+        st["sessions"] = dict(sorted(ses.items(), key=lambda kv: kv[1]["seen"])[-20:])  # 20 appareils au plus
+        write_json(AUTH_FILE, st)
+    return f"{exp}.{sid}.{_sign(exp, sid)}"
+
+
+_seen = {}
+
+
+def session_id(value):
+    """Identifiant de la session si le cookie est valide et la session toujours ouverte, sinon None."""
+    try:
+        exp, sid, sig = value.split(".")
+        if not hmac.compare_digest(sig, _sign(exp, sid)) or int(exp) < time.time():
+            return None
+    except (ValueError, AttributeError):
+        return None
+    if sid not in auth_state().get("sessions", {}):
+        return None
+    now = int(time.time())
+    if now - _seen.get(sid, 0) > 300:  # « dernière activité » à 5 min près : pas d'écriture à chaque requête
+        _seen[sid] = now
+        with _auth_lock:
+            st = auth_state()
+            if sid in st.get("sessions", {}):
+                st["sessions"][sid]["seen"] = now
+                write_json(AUTH_FILE, st)
+    return sid
+
+
+def end_sessions(keep=None, only=None, **changes):
+    """only : ferme cette session ; sinon ferme toutes les sessions sauf keep. changes : ex. nouveau mot de passe."""
+    with _auth_lock:
+        st = auth_state()
+        ses = st.get("sessions", {})
+        st["sessions"] = {k: v for k, v in ses.items() if (k != only if only else k == keep)}
+        st.update(changes)
         write_json(AUTH_FILE, st)
 
 
@@ -359,10 +385,9 @@ class Handler(BaseHTTPRequestHandler):
             raise ApiError(400, "JSON invalide")
 
     def authed(self):
-        if not auth_enabled():
-            return True
         c = cookies.SimpleCookie(self.headers.get("Cookie", ""))
-        return "pvehub" in c and valid_session(c["pvehub"].value)
+        self.sid = session_id(c["pvehub"].value) if "pvehub" in c else None
+        return bool(self.sid) or not auth_enabled()
 
     def qs(self):
         return {k: v[0] for k, v in urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).items()}
@@ -399,12 +424,17 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/login" and method == "POST":
                 return self.login()
             if path == "/api/logout" and method == "POST":
+                if self.authed() and self.sid:
+                    end_sessions(only=self.sid)
                 return self.send_json({"ok": True}, extra=self.cookie("", 0))
             if not self.authed():
                 raise ApiError(401, "Non connecté")
+            if path == "/api/auth" and method == "GET":
+                return self.send_json(self.auth_info())
             if path == "/api/auth/revoke" and method == "POST":
-                bump_gen()  # cet appareil reçoit aussitôt un nouveau cookie, les autres sont déconnectés
-                return self.send_json({"ok": True}, extra=self.cookie(make_session(), SESSION_DAYS * 86400))
+                sid = str(self.body().get("id") or "")
+                end_sessions(only=sid) if sid else end_sessions(keep=self.sid)  # une session, ou toutes sauf celle-ci
+                return self.send_json({"ok": True, "self": sid == self.sid})
             if path == "/api/auth/password" and method == "POST":
                 return self.change_password()
             route = ROUTES.get((method, path))
@@ -432,7 +462,7 @@ class Handler(BaseHTTPRequestHandler):
         ok = check_password(str(d.get("password", "")))
         log_login(ok, *self.client())
         if ok:
-            return self.send_json({"ok": True}, extra=self.cookie(make_session(), SESSION_DAYS * 86400))
+            return self.send_json({"ok": True}, extra=self.cookie(make_session(*self.client()), SESSION_DAYS * 86400))
         time.sleep(1.5)
         raise ApiError(403, "Mot de passe incorrect")
 
@@ -444,8 +474,17 @@ class Handler(BaseHTTPRequestHandler):
             raise ApiError(403, "Mot de passe actuel incorrect")
         if len(new) < 10 or len(new) > 200:
             raise ApiError(400, "Le nouveau mot de passe doit faire au moins 10 caractères")
-        bump_gen(pw=hash_pw(new))  # les autres appareils devront se reconnecter
-        return self.send_json({"ok": True}, extra=self.cookie(make_session(), SESSION_DAYS * 86400))
+        end_sessions(keep=self.sid, pw=hash_pw(new))  # les autres appareils devront se reconnecter
+        if self.sid:
+            return self.send_json({"ok": True})
+        # pas encore de mot de passe jusque-là : cet appareil reçoit sa première session
+        return self.send_json({"ok": True}, extra=self.cookie(make_session(*self.client()), SESSION_DAYS * 86400))
+
+    def auth_info(self):
+        st = auth_state()
+        ses = [{"id": k, **v, "current": k == self.sid} for k, v in st.get("sessions", {}).items()]
+        return {"enabled": auth_enabled(), "custom": bool(st.get("pw")), "log": st.get("log", []),
+                "sessions": sorted(ses, key=lambda x: (not x["current"], -x["seen"]))}
 
     # -- chat (stream SSE)
     def chat(self):
@@ -1925,13 +1964,7 @@ def r_tasks(q):
     return {"items": pve("GET", f"/nodes/{q['node']}/tasks", {"limit": 20}) or []}
 
 
-def r_auth(_):
-    st = auth_state()
-    return {"enabled": auth_enabled(), "custom": bool(st.get("pw")), "log": st.get("log", [])}
-
-
 ROUTES = {
-    ("GET", "/api/auth"): r_auth,
     ("POST", "/api/store/uninstall"): r_store_uninstall,
     ("GET", "/api/overview"): r_overview,
     ("GET", "/api/rrd"): r_rrd,

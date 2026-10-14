@@ -169,16 +169,22 @@ srv.APP_PASSWORD = "initial-pass"
 srv.send_push = lambda *a: 0
 srv.threading.Thread = lambda target, daemon, args=(): type("T", (), {"start": lambda self: target(*args)})()
 assert srv.check_password("initial-pass") and not srv.check_password("initial-pas")
-c1 = srv.make_session()
-assert srv.valid_session(c1) and not srv.valid_session(c1[:-1] + ("1" if c1[-1] == "0" else "0")) and not srv.valid_session("123.abc")
-srv.bump_gen()
-assert not srv.valid_session(c1) and srv.valid_session(srv.make_session())       # « déconnecter les autres appareils »
-srv.bump_gen(pw=srv.hash_pw("nouveau-mot-de-passe"))
-assert srv.check_password("nouveau-mot-de-passe") and not srv.check_password("initial-pass")
+c1 = srv.make_session("100.64.0.1", "", "iPhone")
+c2 = srv.make_session("100.64.0.2", "", "Mac")
+sid1, sid2 = c1.split(".")[1], c2.split(".")[1]
+assert srv.session_id(c1) == sid1 and srv.session_id(c2) == sid2
+assert srv.session_id(c1[:-1] + ("1" if c1[-1] == "0" else "0")) is None and srv.session_id("123.abc") is None
+srv.end_sessions(only=sid2)                                                    # déconnecter un seul appareil
+assert srv.session_id(c2) is None and srv.session_id(c1) == sid1
+c3 = srv.make_session()
+srv.end_sessions(keep=sid1)                                                    # « déconnecter les autres appareils »
+assert srv.session_id(c3) is None and srv.session_id(c1) == sid1
+srv.end_sessions(keep=sid1, pw=srv.hash_pw("nouveau-mot-de-passe"))
+assert srv.check_password("nouveau-mot-de-passe") and not srv.check_password("initial-pass") and srv.session_id(c1) == sid1
 for i in range(35):
     srv.log_login(i % 2 == 0, "100.64.0.1", "", "Mozilla/5.0 (iPhone)")
 st = srv.auth_state()
-assert len(st["log"]) == 30 and st["gen"] == 2 and st["warned"], st.keys()
+assert len(st["log"]) == 30 and list(st["sessions"]) == [sid1] and st["warned"], st.keys()
 # store : suivi des apps installées, désinstallation (sauvegarde → arrêt → suppression), fusion dans l'onglet Apps
 srv.threading.Thread = REAL_THREAD
 srv.INSTALLED_FILE, srv.APPS_FILE = os.path.join(srv.DATA_DIR, "inst.json"), os.path.join(srv.DATA_DIR, "apps.json")

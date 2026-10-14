@@ -328,7 +328,9 @@ tailscale serve --https=8443 off                             # si tu avais publi
 - Notifications : le contenu est chiffré de bout en bout entre ton serveur et ton téléphone (standard Web Push) ;
   Apple ou Google ne font que transporter un message illisible.
 - Accès protégé par mot de passe (session de 30 jours). Dans **Réglages → Sécurité** :
-  - les dernières connexions, réussies ou non, avec l'adresse (ou le compte Tailscale) et le type d'appareil ;
+  - **Appareils connectés** : chaque appareil connecté, avec sa dernière activité ; touche-en un pour le
+    déconnecter seul ;
+  - **Dernières tentatives** : connexions réussies ou non, avec l'adresse (ou le compte Tailscale) et le type d'appareil ;
   - **Changer le mot de passe** : il est enregistré haché dans `data/auth.json` et remplace `APP_PASSWORD` ;
     les autres appareils sont déconnectés ;
   - **Déconnecter les autres appareils** : utile si un téléphone est perdu.

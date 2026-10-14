@@ -1379,15 +1379,20 @@ async function copyText(t) {
 }
 
 // ---------- sécurité : connexions récentes, mot de passe, sessions
+const uaName = u => /iPhone/.test(u) ? "iPhone" : /iPad/.test(u) ? "iPad" : /Android/.test(u) ? "Android" : /Mac OS/.test(u) ? "Mac" : /Windows/.test(u) ? "Windows" : /Linux/.test(u) ? "Linux" : "Appareil inconnu";
 function securityHtml() {
   const a = S.auth;
-  if (!a) return `<div class="cell"><div class="body mute">Chargement…</div></div>`;
-  const ua = u => /iPhone|iPad/.test(u) ? "iPhone/iPad" : /Android/.test(u) ? "Android" : /Mac OS/.test(u) ? "Mac" : /Windows/.test(u) ? "Windows" : /Linux/.test(u) ? "Linux" : "Appareil inconnu";
-  const rows = a.log.slice(0, 8).map(l => `<div class="cell"><div class="body"><div class="t">${l.ok ? "✅ Connexion" : "⛔️ Mot de passe incorrect"}</div>
-      <div class="s">${esc(l.who || l.ip)} · ${esc(ua(l.ua))}</div></div><div class="v" style="font-size:14px">${when(l.t)}</div></div>`).join("");
-  return `${rows || `<div class="cell"><div class="body mute">Aucune connexion enregistrée</div></div>`}
-    <button class="cell tap act" id="chgPw"><div class="body">${a.enabled ? "Changer le mot de passe" : "Définir un mot de passe"}</div></button>
-    ${a.enabled ? `<button class="cell tap act danger" id="revoke"><div class="body">Déconnecter les autres appareils</div></button>` : ""}`;
+  if (!a) return `<div class="hdr">Sécurité</div><div class="group"><div class="cell"><div class="body mute">Chargement…</div></div></div>`;
+  const ses = (a.sessions || []).map(x => `<button class="cell tap" data-ses="${esc(x.id)}"><div class="body"><div class="t">${esc(uaName(x.ua))}${x.current ? ` <span class="mute">· cet appareil</span>` : ""}</div>
+      <div class="s">${esc(x.who || x.ip)} · actif ${ago(x.seen)}</div></div>${I.chev}</button>`).join("");
+  const log = a.log.slice(0, 5).map(l => `<div class="cell"><div class="body"><div class="t">${l.ok ? "✅ Connexion" : "⛔️ Mot de passe incorrect"}</div>
+      <div class="s">${esc(l.who || l.ip)} · ${esc(uaName(l.ua))}</div></div><div class="v" style="font-size:14px">${when(l.t)}</div></div>`).join("");
+  return `${a.enabled ? `<div class="hdr">Appareils connectés</div><div class="group">${ses || `<div class="cell"><div class="body mute">Aucun</div></div>`}
+      ${(a.sessions || []).length > 1 ? `<button class="cell tap act danger" id="revoke"><div class="body">Déconnecter les autres appareils</div></button>` : ""}</div>
+    <div class="ftr">Touche un appareil pour le déconnecter.</div>` : ""}
+    <div class="hdr">Dernières tentatives</div><div class="group">${log || `<div class="cell"><div class="body mute">Aucune connexion enregistrée</div></div>`}
+    <button class="cell tap act" id="chgPw"><div class="body">${a.enabled ? "Changer le mot de passe" : "Définir un mot de passe"}</div></button></div>
+    <div class="ftr">Changer le mot de passe déconnecte aussi les autres appareils. Une notification arrive en cas de mot de passe incorrect.</div>`;
 }
 
 // ---------- apparence
@@ -1398,6 +1403,7 @@ function openSettings() {
   const m = document.createElement("div"); m.className = "modal";
   const draw = () => {
     const mode = t.mode || "auto", acc = t.accent || "blue", bg = t.bg || "system";
+    const sc = m.firstElementChild?.scrollTop || 0;  // un rafraîchissement ne doit pas remonter en haut
     m.innerHTML = `<div class="card-sheet"><div class="grab"></div><div class="shead"><span style="width:60px"></span><h2>Réglages</h2><button class="navbtn" style="font-weight:600;width:60px;justify-content:flex-end" data-close>OK</button></div>
       <div class="hdr">Apparence</div>
       <div class="seg" style="margin-bottom:0">${[["auto", "Auto"], ["light", "Clair"], ["dark", "Sombre"]].map(([k, l]) => `<button class="${mode === k ? "on" : ""}" data-mode="${k}">${l}</button>`).join("")}</div>
@@ -1421,11 +1427,10 @@ function openSettings() {
           : `<button class="cell tap act" id="chkUpd"><div class="body">${S.ver?.error ? esc(S.ver.error) : S.ver ? "À jour · Vérifier maintenant" : "Vérifier maintenant"}</div></button>`}
       </div>
       <div class="ftr">${S.ver?.checked_at ? `Dernière vérification : ${when(S.ver.checked_at)}. ` : ""}Vérification automatique une fois par semaine.${S.ver && !S.ver.can_update ? "<br>" + esc(S.ver.why_not) : ""}</div>
-      <div class="hdr">Sécurité</div>
-      <div class="group">${securityHtml()}</div>
-      <div class="ftr">Changer le mot de passe déconnecte aussi les autres appareils. Une notification arrive en cas de mot de passe incorrect.</div>
+      ${securityHtml()}
       <div class="hdr">Compte</div>
       <div class="group"><button class="cell tap act danger" id="logout"><div class="body">Se déconnecter</div></button></div></div>`;
+    m.firstElementChild.scrollTop = sc;
   };
   draw();
   api("/api/remote").then(r => { S.remote = r; if (m.isConnected) draw(); }).catch(() => {});
@@ -1459,13 +1464,21 @@ function openSettings() {
       if (!v) return;
       if (v.new !== v.again) return toast("❌ Les deux mots de passe ne correspondent pas");
       try { await api("/api/auth/password", { body: { current: v.current || "", new: v.new } }); toast("✅ Mot de passe changé"); }
-      catch (err) { toast("❌ " + err.message, 5000); }
-      return;
+      catch (err) { return toast("❌ " + err.message, 5000); }
+      S.auth = await api("/api/auth").catch(() => S.auth); return draw();
     }
     if (e.target.closest("#revoke")) {
       if (!await confirmBox("Déconnecter les autres appareils", "Tous les appareils devront se reconnecter, sauf celui-ci.", "Déconnecter", true)) return;
       try { await api("/api/auth/revoke", { body: {} }); toast("✅ Autres appareils déconnectés"); } catch (err) { toast("❌ " + err.message); }
-      return;
+      S.auth = await api("/api/auth").catch(() => S.auth); return draw();
+    }
+    const sb = e.target.closest("[data-ses]");
+    if (sb) {
+      const x = S.auth.sessions.find(z => z.id === sb.dataset.ses); if (!x) return;
+      if (!await confirmBox(esc(uaName(x.ua)), `${esc(x.who || x.ip)} · connecté le ${when(x.t)}`, x.current ? "Me déconnecter" : "Déconnecter cet appareil", true)) return;
+      try { await api("/api/auth/revoke", { body: { id: x.id } }); } catch (err) { return toast("❌ " + err.message); }
+      if (x.current) { m.remove(); return showLogin(); }
+      toast("✅ Appareil déconnecté"); S.auth = await api("/api/auth").catch(() => S.auth); return draw();
     }
     if (e.target.closest("#logout")) { await api("/api/logout", { body: {} }).catch(() => {}); m.remove(); return showLogin(); }
     const b = e.target.closest("[data-mode],[data-accent],[data-bg]"); if (!b || b.tagName !== "BUTTON") return;
