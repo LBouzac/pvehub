@@ -320,14 +320,14 @@ def log_login(ok, ip, who, ua):
     now = int(time.time())
     with _auth_lock:
         st = auth_state()
-        st["log"] = ([{"t": now, "ok": ok, "ip": ip[:64], "who": who[:80], "ua": ua[:120]}] + st.get("log", []))[:30]
         warn = not ok and now - st.get("warned", 0) > 600
         if warn:
             st["warned"] = now
         write_json(AUTH_FILE, st)
+    log_event("login", "Connexion" if ok else "Mot de passe incorrect", who or ip, ok=ok, ua=ua[:120])
     if warn:
         threading.Thread(target=send_push, args=("🔐 Mot de passe incorrect",
-                         f"Tentative de connexion refusée depuis {who or ip}.", "/#security", "login"), daemon=True).start()
+                         f"Tentative de connexion refusée depuis {who or ip}.", "/#journal=login", "login"), daemon=True).start()
 
 
 # ---------------------------------------------------------------- HTTP
@@ -433,7 +433,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json(self.auth_info())
             if path == "/api/auth/revoke" and method == "POST":
                 sid = str(self.body().get("id") or "")
+                gone = auth_state().get("sessions", {}).get(sid, {})
                 end_sessions(only=sid) if sid else end_sessions(keep=self.sid)  # une session, ou toutes sauf celle-ci
+                if sid != self.sid:
+                    log_event("security", "Appareil déconnecté" if sid else "Autres appareils déconnectés",
+                              gone.get("who") or gone.get("ip", ""), ua=gone.get("ua", ""))
                 return self.send_json({"ok": True, "self": sid == self.sid})
             if path == "/api/auth/password" and method == "POST":
                 return self.change_password()
@@ -475,6 +479,7 @@ class Handler(BaseHTTPRequestHandler):
         if len(new) < 10 or len(new) > 200:
             raise ApiError(400, "Le nouveau mot de passe doit faire au moins 10 caractères")
         end_sessions(keep=self.sid, pw=hash_pw(new))  # les autres appareils devront se reconnecter
+        log_event("security", "Mot de passe changé", "Les autres appareils ont été déconnectés")
         if self.sid:
             return self.send_json({"ok": True})
         # pas encore de mot de passe jusque-là : cet appareil reçoit sa première session
@@ -483,7 +488,7 @@ class Handler(BaseHTTPRequestHandler):
     def auth_info(self):
         st = auth_state()
         ses = [{"id": k, **v, "current": k == self.sid} for k, v in st.get("sessions", {}).items()]
-        return {"enabled": auth_enabled(), "custom": bool(st.get("pw")), "log": st.get("log", []),
+        return {"enabled": auth_enabled(), "custom": bool(st.get("pw")),
                 "sessions": sorted(ses, key=lambda x: (not x["current"], -x["seen"]))}
 
     # -- chat (stream SSE)
@@ -703,6 +708,9 @@ def run_upgrade(job_id, node, vmid, snapshot):
         job.update(status="error", error=e.msg)
     except Exception as e:  # noqa: BLE001
         job.update(status="error", error=str(e)[:200])
+    name = _updates["cts"].get(vmid, {}).get("name") or f"Conteneur {vmid}"
+    log_event("update", f"{name} mis à jour" if job["status"] == "done" else f"{name} : mise à jour en échec",
+              job.get("error") or (f"Snapshot {job['snapshot']}" if job.get("snapshot") else ""), f"/#g=lxc/{vmid}")
 
 
 def r_maint_upgrade(d):
@@ -862,6 +870,28 @@ def write_json(path, obj):
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(obj, f, ensure_ascii=False, indent=1)
     os.replace(tmp, path)
+
+
+# Journal : alertes, connexions, actions (Store, mises à jour, sécurité) — les 300 derniers événements
+EVENTS_FILE = os.path.join(DATA_DIR, "events.json")
+EVENT_KINDS = {"alert", "login", "security", "store", "update", "report"}
+_events_lock = threading.Lock()
+
+
+def log_event(kind, title, body="", url=None, **extra):
+    try:
+        with _events_lock:
+            ev = read_json(EVENTS_FILE, [])
+            ev.append({"ts": int(time.time()), "kind": kind, "title": title[:120], "body": str(body)[:300], "url": url, **extra})
+            write_json(EVENTS_FILE, ev[-300:])
+    except OSError as e:  # le journal ne doit jamais bloquer l'action qu'il raconte
+        print("Journal :", repr(e), file=sys.stderr)
+
+
+def r_events(q):
+    ev = read_json(EVENTS_FILE, [])
+    kind = q.get("kind")
+    return {"events": [e for e in reversed(ev) if not kind or e["kind"] == kind]}
 
 
 def raw_pub(key):
@@ -1138,6 +1168,7 @@ def monitor_once(ctx):
             alerts.append(("Mises à jour disponibles", " et ".join(parts) + " à mettre à jour.", "/#maint"))
     for title, body, url in alerts:
         send_push(title, body, url, tag=title)
+        log_event("alert", title, body, url)
     state["log"] = (state.get("log", []) + [{"ts": now, "title": t, "body": b} for t, b, _ in alerts])[-50:]
     # rapport du matin, rédigé en arrière-plan (Hermes peut mettre une minute)
     if s["report"] and state.get("report_day") != today and ln.strftime("%H:%M") >= s["report_time"]:
@@ -1390,6 +1421,9 @@ def run_store_job(job, kind, *args):
     except Exception as e:  # noqa: BLE001
         job.update(status="error", error=str(e)[:200])
     job_log(job, "✓ Terminé" if job["status"] == "done" else f"✕ {job.get('error')}")
+    verb = "désinstallé" if kind == "uninstall" else "installé"
+    log_event("store", f"{job['name']} {verb}" if job["status"] == "done" else f"{job['name']} : échec",
+              job.get("error") or (f"Conteneur {job['vmid']}" if job.get("vmid") else ""))
 
 
 def r_store_install(d):
@@ -1509,6 +1543,7 @@ def generate_report(push=True):
         write_json(REPORTS_FILE, ([rep] + read_json(REPORTS_FILE, []))[:14])
     if push:
         send_push("☀️ Rapport du matin", summary, "/#report", tag="report")
+    log_event("report", "Rapport du matin", summary, "/#report")
     return rep
 
 
@@ -1629,6 +1664,7 @@ def r_update(_):
     code, out = run_ssh(f"bash -c {shlex.quote(cmd)}", timeout=240)
     if code != 0:
         raise ApiError(502, "La mise à jour a échoué :\n" + out[-1500:])
+    log_event("update", "PVE Hub mis à jour", f"Version {v['remote']}")
     return {"ok": True, "version": v["remote"], "output": out[-1500:]}
 
 
@@ -1966,6 +2002,7 @@ def r_tasks(q):
 
 ROUTES = {
     ("POST", "/api/store/uninstall"): r_store_uninstall,
+    ("GET", "/api/events"): r_events,
     ("GET", "/api/overview"): r_overview,
     ("GET", "/api/rrd"): r_rrd,
     ("GET", "/api/guest"): r_guest,

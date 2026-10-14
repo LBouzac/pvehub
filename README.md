@@ -200,6 +200,17 @@ Les notifications ont besoin de l'adresse HTTPS (Tailscale, ci-dessus). Sur iPho
 Le serveur vérifie tout cela chaque minute, même quand l'app est fermée. Toucher une notification ouvre directement
 la machine concernée ou l'écran Maintenance. Répète l'étape 3 sur chaque appareil qui doit recevoir les alertes.
 
+### Journal
+
+Onglet **Serveur** → **Journal** : l'historique de ce qui s'est passé, regroupé par jour, avec des filtres.
+- **Alertes** : toutes les alertes envoyées (même celles que tu as balayées) et les rapports du matin ;
+- **Connexions** : connexions réussies et mots de passe incorrects, avec l'adresse et le type d'appareil ;
+- **Actions** : apps installées ou désinstallées par le Store, mises à jour des conteneurs et de PVE Hub,
+  appareils déconnectés, changement de mot de passe.
+
+Toucher un événement ouvre la machine ou l'écran concerné. Les 300 derniers événements sont gardés
+(`data/events.json`).
+
 ## Store : installer de nouvelles apps
 
 Onglet **Apps** → icône de sac en haut à droite.
@@ -330,7 +341,7 @@ tailscale serve --https=8443 off                             # si tu avais publi
 - Accès protégé par mot de passe (session de 30 jours). Dans **Réglages → Sécurité** :
   - **Appareils connectés** : chaque appareil connecté, avec sa dernière activité ; touche-en un pour le
     déconnecter seul ;
-  - **Dernières tentatives** : connexions réussies ou non, avec l'adresse (ou le compte Tailscale) et le type d'appareil ;
+  - **Tentatives de connexion** : ouvre le [Journal](#journal) filtré sur les connexions ;
   - **Changer le mot de passe** : il est enregistré haché dans `data/auth.json` et remplace `APP_PASSWORD` ;
     les autres appareils sont déconnectés ;
   - **Déconnecter les autres appareils** : utile si un téléphone est perdu.

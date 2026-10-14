@@ -322,6 +322,7 @@ canvas{width:100%;height:120px;display:block}
 
 <div class="push" id="maint"></div>
 <div class="push" id="store"></div>
+<div class="push" id="journal"></div>
 <div class="push" id="sheet" style="z-index:35"></div>
 <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
 
@@ -505,7 +506,8 @@ function renderDash() {
       <div class="tile"><div class="k" style="color:var(--purple)">${I.disk}Stockage</div><div class="n">${st.length ? pct(st.reduce((a, s) => a + s.disk, 0), st.reduce((a, s) => a + s.maxdisk, 0)).toFixed(0) : "–"}<small> %</small></div>${st.length ? bar(pct(st.reduce((a, s) => a + s.disk, 0), st.reduce((a, s) => a + s.maxdisk, 0))) : ""}</div>
     </div>`;
   h += `<div class="group" style="margin-top:14px"><button class="cell icon tap" id="maintBtn">${icoBox(I.wrench.replace(/width="12" height="12"/, ""), "orange")}
-    <div class="body"><div class="t">Maintenance</div><div class="s">${esc(maintSummary())}</div></div>${maintAlert() ? '<span class="dot" style="background:var(--orange)"></span>' : ""}${I.chev}</button></div>`;
+    <div class="body"><div class="t">Maintenance</div><div class="s">${esc(maintSummary())}</div></div>${maintAlert() ? '<span class="dot" style="background:var(--orange)"></span>' : ""}${I.chev}</button>
+    <button class="cell icon tap" id="journalBtn">${icoBox(I.bell, "red")}<div class="body"><div class="t">Journal</div><div class="s">Alertes, connexions et actions</div></div>${I.chev}</button></div>`;
   for (const n of nodes) {
     const c = (n.cpu || 0) * 100;
     h += `<div class="hdr"><span class="grow">Nœud ${esc(n.node)}</span></div><div class="group">
@@ -520,6 +522,7 @@ function renderDash() {
     `<div class="cell"><div class="body"><div class="row"><span class="grow">${esc(s.storage)}${nodes.length > 1 ? ` <span class="mute">· ${esc(s.node)}</span>` : ""}</span><span class="mute">${fb(s.disk)} / ${fb(s.maxdisk)}</span></div>${bar(pct(s.disk, s.maxdisk))}</div></div>`).join("") + `</div>`;
   $("#v-dash").innerHTML = h;
   $("#maintBtn").onclick = openMaint;
+  $("#journalBtn").onclick = () => openJournal();
   $("#updBanner") && ($("#updBanner").onclick = () => S.ver.can_update ? doUpdate() : openSettings());
   loadNodeCharts();
 }
@@ -562,7 +565,7 @@ function openGuest(id) {
   renderGuest(); loadGuestExtras();
 }
 function closeGuest() { S.guest = null; $("#sheet").classList.remove("open"); }
-addEventListener("popstate", () => { if (S.guest) closeGuest(); else if (S.maintOpen) closeMaint(); else if (S.storeOpen) closeStore(); });
+addEventListener("popstate", () => { if (S.guest) closeGuest(); else if (S.maintOpen) closeMaint(); else if (S.storeOpen) closeStore(); else if (S.jOpen) closeJournal(); });
 
 function renderGuest() {
   const g = findGuest(S.guest); if (!g) return;
@@ -959,6 +962,7 @@ function openFromHash() {
   if (h === "maint") openMaint();
   else if (h === "report") openLatestReport();
   else if (h === "security") openSettings();
+  else if (h === "journal" || h.startsWith("journal=")) openJournal(h.split("=")[1]);
   else if (h.startsWith("g=") && findGuest(h.slice(2))) { setView("guests"); openGuest(h.slice(2)); }
 }
 
@@ -1385,15 +1389,63 @@ function securityHtml() {
   if (!a) return `<div class="hdr">Sécurité</div><div class="group"><div class="cell"><div class="body mute">Chargement…</div></div></div>`;
   const ses = (a.sessions || []).map(x => `<button class="cell tap" data-ses="${esc(x.id)}"><div class="body"><div class="t">${esc(uaName(x.ua))}${x.current ? ` <span class="mute">· cet appareil</span>` : ""}</div>
       <div class="s">${esc(x.who || x.ip)} · actif ${ago(x.seen)}</div></div>${I.chev}</button>`).join("");
-  const log = a.log.slice(0, 5).map(l => `<div class="cell"><div class="body"><div class="t">${l.ok ? "✅ Connexion" : "⛔️ Mot de passe incorrect"}</div>
-      <div class="s">${esc(l.who || l.ip)} · ${esc(uaName(l.ua))}</div></div><div class="v" style="font-size:14px">${when(l.t)}</div></div>`).join("");
   return `${a.enabled ? `<div class="hdr">Appareils connectés</div><div class="group">${ses || `<div class="cell"><div class="body mute">Aucun</div></div>`}
       ${(a.sessions || []).length > 1 ? `<button class="cell tap act danger" id="revoke"><div class="body">Déconnecter les autres appareils</div></button>` : ""}</div>
     <div class="ftr">Touche un appareil pour le déconnecter.</div>` : ""}
-    <div class="hdr">Dernières tentatives</div><div class="group">${log || `<div class="cell"><div class="body mute">Aucune connexion enregistrée</div></div>`}
+    <div class="group" style="margin-top:20px"><button class="cell tap" id="jLogins"><div class="body">Tentatives de connexion</div>${I.chev}</button>
     <button class="cell tap act" id="chgPw"><div class="body">${a.enabled ? "Changer le mot de passe" : "Définir un mot de passe"}</div></button></div>
     <div class="ftr">Changer le mot de passe déconnecte aussi les autres appareils. Une notification arrive en cas de mot de passe incorrect.</div>`;
 }
+
+// ---------- journal : alertes, connexions, actions
+const J_KIND = { alert: [I.bell, "red"], login: [I.shield, "accent"], security: [I.shield, "orange"], store: [I.bag, "purple"], update: [I.reboot, "green"], report: [I.chat, "indigo"] };
+const J_FILTERS = [["", "Tout"], ["alert", "Alertes"], ["login", "Connexions"], ["actions", "Actions"]];
+function openJournal(filter) {
+  S.jOpen = true; S.jFilter = filter || ""; $("#journal").scrollTop = 0; $("#journal").classList.add("open"); history.pushState({ j: 1 }, "");
+  renderJournal(); loadJournal();
+}
+function closeJournal() { S.jOpen = false; $("#journal").classList.remove("open"); }
+async function loadJournal() {
+  try { S.jEv = (await api("/api/events")).events; S.jErr = null; } catch (e) { S.jErr = e.message; }
+  if (S.jOpen) renderJournal();
+}
+function dayLabel(ts) {
+  const d = new Date(ts * 1000), t = new Date(); t.setHours(0, 0, 0, 0);
+  const diff = Math.round((t - new Date(d).setHours(0, 0, 0, 0)) / 86400000);
+  return diff === 0 ? "Aujourd'hui" : diff === 1 ? "Hier" : d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
+}
+function renderJournal() {
+  const f = S.jFilter, sc = $("#journal").scrollTop;
+  const list = (S.jEv || []).filter(e => !f || (f === "actions" ? ["security", "store", "update", "report"].includes(e.kind) : e.kind === f));
+  let h = `<div class="navbar ${sc > 30 ? "scrolled" : ""}" id="jnav"><div class="nt">Journal</div>
+      <div class="side"><button class="navbtn" onclick="history.back()">${I.back}Retour</button></div>
+      <div class="side r"><button class="navbtn" id="jRefresh">Actualiser</button></div></div>
+    <h1 class="large">Journal</h1>
+    <div class="seg">${J_FILTERS.map(([k, l]) => `<button class="${f === k ? "on" : ""}" data-jf="${k}">${l}</button>`).join("")}</div>`;
+  if (!S.jEv) h += `<div class="empty">${S.jErr ? esc(S.jErr) : "Chargement…"}</div>`;
+  else if (!list.length) h += `<div class="empty">Rien pour l'instant.</div>`;
+  let day = null;
+  for (const e of list) {
+    const d = dayLabel(e.ts);
+    if (d !== day) { h += `${day ? "</div>" : ""}<div class="hdr">${esc(d)}</div><div class="group">`; day = d; }
+    const [ico, col] = e.kind === "login" && !e.ok ? [I.shield, "red"] : J_KIND[e.kind] || [I.bell, "gray"];
+    const sub = [e.body, e.ua ? uaName(e.ua) : ""].filter(Boolean).join(" · ");
+    const tag = e.url ? "button" : "div";
+    h += `<${tag} class="cell icon ${e.url ? "tap" : ""}" ${e.url ? `data-jurl="${esc(e.url)}"` : ""}>${icoBox(ico, col)}<div class="body"><div class="t">${esc(e.title)}</div>
+      ${sub ? `<div class="s" style="line-height:1.35">${esc(sub)}</div>` : ""}</div>
+      <div class="v" style="font-size:14px">${new Date(e.ts * 1000).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</div>${e.url ? I.chev : ""}</${tag}>`;
+  }
+  if (day) h += "</div>";
+  h += `<div class="ftr">Les 300 derniers événements sont gardés sur le serveur.</div><div style="height:calc(40px + env(safe-area-inset-bottom))"></div>`;
+  $("#journal").innerHTML = h; $("#journal").scrollTop = sc;
+}
+$("#journal").addEventListener("scroll", () => $("#jnav")?.classList.toggle("scrolled", $("#journal").scrollTop > 30), { passive: true });
+$("#journal").addEventListener("click", e => {
+  const fb = e.target.closest("[data-jf]"); if (fb) { S.jFilter = fb.dataset.jf; return renderJournal(); }
+  if (e.target.closest("#jRefresh")) return loadJournal();
+  const u = e.target.closest("[data-jurl]");
+  if (u) { closeJournal(); history.replaceState(null, "", u.dataset.jurl); openFromHash(); }
+});
 
 // ---------- apparence
 const ACCENTS = [["blue", "Bleu"], ["indigo", "Indigo"], ["purple", "Violet"], ["pink", "Rose"], ["red", "Rouge"], ["orange", "Orange"], ["green", "Vert"], ["teal", "Turquoise"], ["mono", "Noir et blanc"]];
@@ -1457,6 +1509,7 @@ function openSettings() {
     }
     if (e.target.closest("#doUpd")) { m.remove(); return doUpdate(); }
     if (e.target.closest("#chkUpd")) { e.target.closest("#chkUpd").querySelector(".body").textContent = "Vérification…"; await checkVersion(true); return draw(); }
+    if (e.target.closest("#jLogins")) { m.remove(); return openJournal("login"); }
     if (e.target.closest("#chgPw")) {
       const v = await alertForm("Changer le mot de passe", "Au moins 10 caractères. Les autres appareils seront déconnectés.",
         [...(S.auth?.enabled ? [{ name: "current", ph: "Mot de passe actuel", type: "password" }] : []),

@@ -146,6 +146,7 @@ assert not srv.RE_SLUG.match("jellyfin; rm -rf /") and srv.RE_SLUG.match("home-a
 # rapport du matin : une fois par jour à l'heure choisie ; un état partiel ne fait pas planter la surveillance
 import datetime, tempfile
 srv.DATA_DIR = tempfile.mkdtemp()
+srv.EVENTS_FILE = os.path.join(srv.DATA_DIR, "events.json")
 srv.ALERTS_FILE, srv.REPORTS_FILE = os.path.join(srv.DATA_DIR, "a.json"), os.path.join(srv.DATA_DIR, "r.json")
 srv.write_json(srv.ALERTS_FILE, {"state": {"log": []}})
 srv.pve = lambda m, path, params=None, timeout=30: []
@@ -184,7 +185,9 @@ assert srv.check_password("nouveau-mot-de-passe") and not srv.check_password("in
 for i in range(35):
     srv.log_login(i % 2 == 0, "100.64.0.1", "", "Mozilla/5.0 (iPhone)")
 st = srv.auth_state()
-assert len(st["log"]) == 30 and list(st["sessions"]) == [sid1] and st["warned"], st.keys()
+assert list(st["sessions"]) == [sid1] and st["warned"], st.keys()
+ev = srv.r_events({"kind": "login"})["events"]
+assert len(ev) == 35 and ev[0]["ok"] is True and ev[1]["title"] == "Mot de passe incorrect", ev[:2]   # plus récent d'abord
 # store : suivi des apps installées, désinstallation (sauvegarde → arrêt → suppression), fusion dans l'onglet Apps
 srv.threading.Thread = REAL_THREAD
 srv.INSTALLED_FILE, srv.APPS_FILE = os.path.join(srv.DATA_DIR, "inst.json"), os.path.join(srv.DATA_DIR, "apps.json")
@@ -213,6 +216,8 @@ try:
 except srv.ApiError:
     pass
 calls.clear(); srv.uninstall({"name": "2FAuth", "log": []}, 120, True)
+srv.run_store_job({"name": "Demo", "source": "x", "log": []}, "uninstall", 999, False)   # machine absente : échec journalisé
+assert srv.r_events({"kind": "store"})["events"][0]["title"] == "Demo : échec"
 assert [c for c in calls if c[0] != "GET"] == [("POST", "/nodes/pve/vzdump"), ("POST", "/nodes/pve/lxc/120/status/stop"),
                                               ("DELETE", "/nodes/pve/lxc/120")], calls
 assert srv.read_json(srv.INSTALLED_FILE, {}) == {}
