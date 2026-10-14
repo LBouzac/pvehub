@@ -2023,7 +2023,7 @@ def r_apps_save(d):
 
 def r_rrd(q):
     tf = q.get("tf", "hour")
-    if tf not in ("hour", "day", "week"):
+    if tf not in ("hour", "day", "week", "month"):
         tf = "hour"
     if q.get("type"):
         node, typ, vmid = guest_args(q)

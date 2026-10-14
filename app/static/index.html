@@ -148,6 +148,9 @@ canvas{width:100%;height:120px;display:block}
 .push{position:fixed;inset:0;z-index:30;background:var(--bg);overflow-y:auto;transform:translateX(100%);transition:transform .35s cubic-bezier(.2,.8,.2,1);-webkit-overflow-scrolling:touch}
 .push.open{transform:none;box-shadow:-10px 0 30px rgba(0,0,0,.15)}
 .push{padding-inline:max(0px,calc((100% - 720px) / 2))}
+.tfsel{display:flex;gap:2px;background:var(--fill);border-radius:8px;padding:2px}
+.tfsel button{font-size:12px;padding:3px 8px;border-radius:6px;color:var(--label2);min-height:24px}
+.tfsel button.on{background:var(--card);color:var(--label);font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.12)}
 #nav{padding-inline:max(8px,calc((100% - 720px) / 2 + 8px))}.tabbar{padding-inline:max(0px,calc((100% - 720px) / 2))}
 @media (min-width:700px){.modal{align-items:center}.card-sheet{border-radius:14px;max-height:85vh}}
 .push .navbar{position:sticky}
@@ -466,7 +469,19 @@ function chart(cv, rows, series, { max, fmt = v => v.toFixed(0) + " %" } = {}) {
 }
 const cpuS = { color: "--orange", v: r => r.cpu * 100 };
 const memS = { color: "--blue", v: r => pct(r.mem ?? r.memused, r.maxmem ?? r.memtotal) };
-const legend = (items, right = "dernière heure") => `<div class="legend">${items.map(([c, l]) => `<span><b style="background:var(${c})"></b>${l}</span>`).join("")}<span class="grow"></span><span>${right}</span></div>`;
+// période des graphiques (commune à tous, retenue sur l'appareil) : Proxmox garde déjà l'historique
+const TFS = [["hour", "1 h"], ["day", "24 h"], ["week", "7 j"], ["month", "30 j"]];
+S.tf = store.get("pvehub.tf", "hour");
+const tfSel = () => `<span class="tfsel" role="group" aria-label="Période">${TFS.map(([k, l]) => `<button class="${S.tf === k ? "on" : ""}" data-tf="${k}" aria-pressed="${S.tf === k}">${l}</button>`).join("")}</span>`;
+const legend = (items, right) => `<div class="legend">${items.map(([c, l]) => `<span><b style="background:var(${c})"></b>${l}</span>`).join("")}<span class="grow"></span>${right ?? tfSel()}</div>`;
+const rrd = a => api("/api/rrd?" + qs({ ...a, tf: S.tf }));
+document.addEventListener("click", e => {
+  const b = e.target.closest("[data-tf]"); if (!b) return;
+  S.tf = b.dataset.tf; store.set("pvehub.tf", S.tf);
+  document.querySelectorAll(".tfsel button").forEach(x => { x.classList.toggle("on", x.dataset.tf === S.tf); x.setAttribute("aria-pressed", x.dataset.tf === S.tf); });
+  nodeRrdAt = 0; if (S.ov) loadNodeCharts();
+  const g = findGuest(S.guest); if (g) rrd({ node: g.node, type: g.type, vmid: g.vmid }).then(r => { guestRrd = r.data; drawGuestCharts(); }).catch(() => {});
+});
 
 // ---------- navigation
 const TITLES = { dash: "Serveur", guests: "Machines", apps: "Apps", exec: "Commandes", chat: "Hermes" };
@@ -552,7 +567,7 @@ async function loadNodeCharts() {
   draw();
   if (Date.now() - nodeRrdAt < 60000) return;
   nodeRrdAt = Date.now();
-  await Promise.all(S.ov.nodes.map(async n => { try { nodeRrd[n.node] = (await api("/api/rrd?" + qs({ node: n.node }))).data; } catch {} }));
+  await Promise.all(S.ov.nodes.map(async n => { try { nodeRrd[n.node] = (await rrd({ node: n.node })).data; } catch {} }));
   draw();
 }
 
@@ -660,7 +675,7 @@ function drawGuestCharts() {
 async function loadGuestExtras() {
   const g = findGuest(S.guest); if (!g) return;
   const a = { node: g.node, type: g.type, vmid: g.vmid };
-  api("/api/rrd?" + qs(a)).then(r => { guestRrd = r.data; drawGuestCharts(); }).catch(() => {});
+  rrd(a).then(r => { guestRrd = r.data; drawGuestCharts(); }).catch(() => {});
   api("/api/guest?" + qs(a)).then(r => { guestCfg = r; if ($("#gopts")) $("#gopts").innerHTML = optsHtml(); }).catch(() => {});
   api("/api/snapshots?" + qs(a)).then(r => { guestSnaps = r.items; }).catch(e => { guestSnaps = { error: e.message }; })
     .finally(() => { if ($("#snaps")) $("#snaps").innerHTML = snapsHtml(); });
@@ -1874,7 +1889,7 @@ document.addEventListener("visibilitychange", loop);
 setInterval(() => {
   if (document.visibilityState !== "visible") return;
   if (S.view === "dash" && S.ov) loadNodeCharts();
-  const g = findGuest(S.guest); if (g) api("/api/rrd?" + qs({ node: g.node, type: g.type, vmid: g.vmid })).then(r => { guestRrd = r.data; drawGuestCharts(); }).catch(() => {});
+  const g = findGuest(S.guest); if (g) rrd({ node: g.node, type: g.type, vmid: g.vmid }).then(r => { guestRrd = r.data; drawGuestCharts(); }).catch(() => {});
 }, 60000);
 addEventListener("resize", () => { if (S.ov) { loadNodeCharts(); drawGuestCharts(); } });
 

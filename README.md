@@ -17,7 +17,7 @@ Petite app web pour piloter ton Proxmox depuis le téléphone, avec l'agent IA H
 </p>
 <p align="center"><sub>Serveur · Machines · Apps · Hermes (thème sombre) · Store · Journal · version ordinateur — données de démonstration</sub></p>
 
-- **Serveur** : CPU, RAM, disque, stockage, graphique de la dernière heure
+- **Serveur** : CPU, RAM, disque, stockage, graphiques sur 1 h, 24 h, 7 jours ou 30 jours
 - **Machines** (VM et conteneurs) : démarrer, éteindre, redémarrer, forcer l'arrêt, snapshots, sauvegardes, démarrage automatique avec le serveur
 - **Apps** : tes services web (Home Assistant, Jellyfin…) en grille d'icônes, détectés automatiquement, avec un point
   vert s'ils répondent ; renommer, changer l'adresse, masquer, ajouter tes propres liens
