@@ -201,7 +201,7 @@ canvas{width:100%;height:120px;display:block}
 .app .ai{width:62px;height:62px;border-radius:15px;display:grid;place-items:center;position:relative;overflow:hidden;color:#fff;font-size:26px;font-weight:600;
   box-shadow:0 1px 3px rgba(0,0,0,.12)}
 .app .ai img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;padding:11px;background:#fff;opacity:0}
-.app .ai img.ok{opacity:1}.app .ai img[src^="/icon.png"]{padding:0}
+.app .ai img.ok{opacity:1}.app .ai img[src^="/icon"]{padding:0}
 .app .an{font-size:12px;text-align:center;width:100%;line-height:1.2;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .app .st{position:absolute;top:-3px;right:calc(50% - 37px);width:13px;height:13px;border-radius:50%;border:2.5px solid var(--bg);background:var(--gray)}
 .app .st.up{background:var(--green)}.app .st.down{background:var(--red)}
@@ -1016,7 +1016,7 @@ async function loadApps(rescan) {
 }
 // logo : bibliothèque selfh.st (comme le Store), sinon l'icône du site si le navigateur peut la charger, sinon l'initiale
 function appImgErr(img) { const alt = (img.dataset.alt || "").split(" ").filter(Boolean); if (alt.length) { img.dataset.alt = alt.slice(1).join(" "); img.src = alt[0]; } else img.remove(); }
-const logoSrc = s => s === "pvehub" ? "/icon.png?v=2" : /^https:/.test(s) ? s : CS_ICON(s);  // PVE Hub : notre propre logo
+const logoSrc = s => s === "pvehub" ? "/icon.png?v=2" : s === "pvehub-light" ? "/icon-light.png?v=2" : /^https:/.test(s) ? s : CS_ICON(s);  // PVE Hub : notre propre logo
 function appTile(a) {
   let origin = ""; try { origin = new URL(a.url).origin; } catch {}
   const fav = origin && (location.protocol === "http:" || origin.startsWith("https:")) ? origin + "/favicon.ico" : "";
@@ -1079,6 +1079,11 @@ $("#v-apps").addEventListener("click", async e => {
   if (i === 0) { const v = await alertForm("Renommer", "Laisse vide pour revenir au nom d'origine.", [{ name: "name", ph: "Nom", value: a.name }]); if (v) saveApp({ op: "edit", id: a.id, name: v.name }); }
   if (i === 1) { const v = await alertForm("Adresse", "", [{ name: "url", ph: "http://…", value: a.url || "" }]); if (v) saveApp({ op: "edit", id: a.id, url: v.url }); }
   if (i === 2) saveApp({ op: "edit", id: a.id, hidden: !a.hidden });
+  if (i === 3 && /^pvehub/.test(a.icon || "")) {  // PVE Hub : son logo sombre ou clair
+    const j = await actionSheet("Logo de PVE Hub", "", [{ label: "Sombre" }, { label: "Clair" }, { label: "Autre logo…" }]);
+    if (j === 0 || j === 1) return saveApp({ op: "edit", id: a.id, icon: j ? "pvehub-light" : "pvehub" });
+    if (j !== 2) return;
+  }
   if (i === 3) {
     const v = await alertForm("Logo", `Le nom d'un logo de <a href="https://selfh.st/icons/" target="_blank" rel="noopener">selfh.st/icons</a> (ex. vaultwarden), ou l'adresse https d'une image. Laisse vide pour revenir au logo détecté.`,
       [{ name: "icon", ph: "jellyfin", value: a.icon || "" }]);
