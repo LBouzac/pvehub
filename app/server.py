@@ -739,9 +739,10 @@ def r_maint_backups(_):
         jobs = pve("GET", "/cluster/backup") or []
     except ApiError:
         jobs = []
-    last, failed = {}, []
+    last, failed, stores = {}, [], set()
     for node in nodes:
         for st in backup_storages(node):
+            stores.add(st)
             try:
                 items = pve("GET", f"/nodes/{node}/storage/{st}/content", {"content": "backup"}) or []
             except ApiError:
@@ -761,10 +762,90 @@ def r_maint_backups(_):
         b = last.get(g["vmid"])
         rows.append({"id": g["id"], "vmid": g["vmid"], "name": g.get("name", ""), "type": g["type"], "node": g["node"],
                      "last": b, "planned": any(job_covers(j, g["vmid"]) for j in jobs)})
-    return {"guests": rows, "failed": failed[:5],
-            "jobs": [{"schedule": j.get("schedule") or j.get("starttime"), "enabled": str(j.get("enabled", 1)) != "0",
-                      "all": str(j.get("all", 0)) == "1", "vmid": j.get("vmid"), "storage": j.get("storage"),
+    return {"guests": rows, "failed": failed[:5], "storages": sorted(stores),
+            "jobs": [{"id": j.get("id"), "schedule": j.get("schedule") or j.get("starttime"), "enabled": str(j.get("enabled", 1)) != "0",
+                      "all": str(j.get("all", 0)) == "1", "vmid": j.get("vmid"), "exclude": j.get("exclude"),
+                      "storage": j.get("storage"), "mode": j.get("mode") or "snapshot", "keep": keep_last(j.get("prune-backups")),
                       "comment": j.get("comment")} for j in jobs]}
+
+
+# ---------------------------------------------------------------- maintenance : sauvegardes planifiées (création / modification)
+BK_DAYS = {"all": "", "week": "mon..fri ", "weekend": "sat,sun ", "sun": "sun "}  # calendrier Proxmox : « [jours ]HH:MM »
+RE_BK_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+RE_CAL = re.compile(r"^[a-z0-9:.,*/ -]{1,60}$")
+
+
+def keep_last(prune):
+    m = re.search(r"keep-last=(\d+)", str(prune or ""))
+    return int(m.group(1)) if m else None
+
+
+def bk_schedule(d):
+    """« HH:MM » + préréglage de jours → calendrier Proxmox ; une planification existante non reconnue est gardée telle quelle."""
+    if d.get("raw"):
+        raw = str(d["raw"]).strip()
+        if not RE_CAL.match(raw):
+            raise ApiError(400, "Planification invalide")
+        return raw
+    if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", str(d.get("time", ""))) or d.get("days") not in BK_DAYS:
+        raise ApiError(400, "Heure ou jours invalides")
+    return BK_DAYS[d["days"]] + d["time"]
+
+
+def backup_job_params(d):
+    p = {"schedule": bk_schedule(d), "mode": d.get("mode") or "snapshot", "compress": "zstd", "enabled": 1 if d.get("enabled", True) else 0,
+         "prune-backups": f"keep-last={int_in(d, 'keep', 1, 365, 'Nombre de sauvegardes à garder')}",
+         "notes-template": "{{guestname}} — PVE Hub"}
+    if p["mode"] not in ("snapshot", "suspend", "stop"):
+        raise ApiError(400, "Mode invalide")
+    if not RE_STORE.match(str(d.get("storage", ""))):
+        raise ApiError(400, "Stockage invalide")
+    p["storage"] = d["storage"]
+    if d.get("all"):
+        p["all"] = 1
+    else:
+        ids = sorted({int(v) for v in d.get("vmids") or [] if str(v).isdigit() and 100 <= int(v) <= 999999999})
+        if not ids:
+            raise ApiError(400, "Choisis au moins une machine, ou « Toutes »")
+        p["vmid"] = ",".join(map(str, ids))
+    return p
+
+
+def pve_admin(method, path, params):
+    """Appel API demandant un droit d'administration (Sys.Modify) : par le jeton, sinon en root par SSH (pvesh)."""
+    try:
+        return pve(method, path, params)
+    except ApiError as e:
+        if "permission" not in e.msg.lower() or not EXEC_ENABLED:
+            raise ApiError(e.status, e.msg + ("" if EXEC_ENABLED else " — active la section Commandes pour gérer les sauvegardes planifiées"))
+    verb = {"POST": "create", "PUT": "set", "DELETE": "delete"}[method]
+    args = " ".join(f"--{k} {shlex.quote(str(v))}" for k, v in params.items())
+    code, out = run_ssh(f"pvesh {verb} {shlex.quote(path)} {args}", timeout=30)
+    if code != 0:
+        raise ApiError(502, out.strip()[-300:] or f"pvesh : code {code}")
+    return None
+
+
+def r_backup_job(d):
+    op, jid = d.get("op"), str(d.get("id", ""))
+    if op != "add" and not RE_BK_ID.match(jid):
+        raise ApiError(400, "Sauvegarde planifiée inconnue")
+    if op == "add":
+        pve_admin("POST", "/cluster/backup", backup_job_params(d))
+    elif op == "update":
+        p = backup_job_params(d)
+        # on repasse de « toutes » à une liste (ou l'inverse) : l'ancien champ est effacé
+        p["delete"] = "vmid" if p.get("all") else "all,exclude"  # les exclusions faites dans Proxmox restent
+        pve_admin("PUT", f"/cluster/backup/{jid}", p)
+    elif op == "toggle":
+        pve_admin("PUT", f"/cluster/backup/{jid}", {"enabled": 1 if d.get("enabled") else 0})
+    elif op == "delete":
+        pve_admin("DELETE", f"/cluster/backup/{jid}", {})
+    else:
+        raise ApiError(400, "Demande invalide")
+    log_event("update", {"add": "Sauvegarde planifiée créée", "update": "Sauvegarde planifiée modifiée", "toggle": "Sauvegarde planifiée " +
+                         ("activée" if d.get("enabled") else "mise en pause"), "delete": "Sauvegarde planifiée supprimée"}[op], "", "/#maint")
+    return r_maint_backups({})
 
 
 # ---------------------------------------------------------------- maintenance : mises à jour des conteneurs
@@ -2589,6 +2670,7 @@ ROUTES = {
     ("POST", "/api/store/uninstall"): r_store_uninstall,
     ("GET", "/api/events"): r_events,
     ("GET", "/api/disks"): r_disks,
+    ("POST", "/api/maint/backupjob"): r_backup_job,
     ("GET", "/api/store/removed"): r_store_removed,
     ("POST", "/api/store/restore"): r_store_restore,
     ("GET", "/api/schedules"): r_schedules,

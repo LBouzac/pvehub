@@ -1430,11 +1430,11 @@ function renderMaint() {
   if (!B) h += load;
   else if (B.error) h += `<div class="cell"><div class="body mute">${esc(B.error)}</div></div>`;
   else {
-    h += B.jobs.length ? B.jobs.map(j => `<div class="cell icon">${icoBox(I.backup, j.enabled ? "green" : "gray")}<div class="body">
-        <div class="t">${esc(scheduleFr(j.schedule))}${j.enabled ? "" : ' <span class="pill">désactivée</span>'}</div>
-        <div class="s">${j.all ? "Toutes les machines" : "Machines " + esc(String(j.vmid || "").replace(/,/g, ", "))} → ${esc(j.storage || "?")}${j.comment ? " · " + esc(j.comment) : ""}</div></div></div>`).join("")
-      : `<div class="cell icon">${icoBox(I.backup, "red")}<div class="body"><div class="t">Aucune sauvegarde planifiée</div>
-        <div class="s" style="line-height:1.35">Crée-en une dans l'interface Proxmox : Datacenter → Sauvegarde → Ajouter.</div></div></div>`;
+    h += B.jobs.length ? B.jobs.map(j => `<button class="cell icon tap" data-bkjob="${esc(j.id)}">${icoBox(I.backup, j.enabled ? "green" : "gray")}<div class="body">
+        <div class="t">${esc(scheduleFr(j.schedule))}${j.enabled ? "" : ' <span class="pill">en pause</span>'}</div>
+        <div class="s">${bkWho(j)} → ${esc(j.storage || "?")}${j.keep ? ` · garde ${j.keep}` : ""}${j.comment ? " · " + esc(j.comment) : ""}</div></div>${I.chev}</button>`).join("")
+      : `<div class="cell icon">${icoBox(I.backup, "red")}<div class="body"><div class="t">Aucune sauvegarde planifiée</div></div></div>`;
+    h += `<button class="cell icon tap act" id="bkAdd">${icoBox(I.plus, "accent")}<div class="body">Nouvelle sauvegarde planifiée</div></button>`;
     h += B.failed.map(f => `<div class="cell icon">${icoBox(I.kill, "red")}<div class="body"><div class="t" style="color:var(--red)">Échec ${when(f.starttime)}</div>
         <div class="s">${f.vmid ? "Machine " + esc(f.vmid) + " · " : ""}${esc(f.status)}</div></div></div>`).join("");
   }
@@ -1484,6 +1484,55 @@ function renderMaint() {
   $("#maint").innerHTML = h; $("#maint").scrollTop = sc;
   $("#mRefresh").onclick = () => { S.mB = S.mD = null; S.mU = { scanning: true, cts: [] }; renderMaint(); loadMaint(true); };
 }
+// sauvegardes planifiées (tâches vzdump de Proxmox)
+const BK_DAYS = { all: "Tous les jours", week: "Du lundi au vendredi", weekend: "Le week-end", sun: "Le dimanche" };
+const BK_MODE = { snapshot: "Sans arrêt (snapshot)", suspend: "Pause pendant la copie", stop: "Arrêt pendant la copie" };
+const bkWho = j => j.all ? "Toutes les machines" + (j.exclude ? " sauf " + esc(String(j.exclude).replace(/,/g, ", ")) : "") : "Machines " + esc(String(j.vmid || "").replace(/,/g, ", "));
+function bkParse(sc) {  // planification Proxmox → { time, days }, ou null si elle ne rentre pas dans les préréglages
+  const m = String(sc || "").trim().match(/^(?:(mon\.\.fri|sat,sun|sun) )?(\d{1,2}):(\d{2})$/);
+  return m && { time: `${m[2].padStart(2, "0")}:${m[3]}`, days: { "mon..fri": "week", "sat,sun": "weekend", sun: "sun" }[m[1]] || "all" };
+}
+async function saveBackupJob(body) {
+  try { S.mB = await api("/api/maint/backupjob", { body }); renderMaint(); if (S.view === "dash") renderDash(); return true; }
+  catch (e) { toast("❌ " + e.message, 6000); return false; }
+}
+function editBackupJob(j) {
+  const p = j ? bkParse(j.schedule) : { time: "02:00", days: "all" };
+  const stores = S.mB?.storages || [], sel = new Set(String(j?.vmid || "").split(",").filter(Boolean).map(Number));
+  let all = j ? j.all : true;
+  const guests = (S.ov?.guests || []).filter(g => !g.template).sort((a, b) => a.vmid - b.vmid);
+  if (!stores.length) return toast("Aucun stockage de sauvegarde trouvé");
+  const m = document.createElement("div"); m.className = "modal";
+  const opt = (o, v) => Object.entries(o).map(([k, l]) => `<option value="${k}" ${k === v ? "selected" : ""}>${l}</option>`).join("");
+  m.innerHTML = `<div class="card-sheet"><div class="grab"></div><div class="shead"><button class="navbtn" style="width:84px" data-cancel>Annuler</button><h2>${j ? "Sauvegarde" : "Nouvelle sauvegarde"}</h2><button class="navbtn" style="font-weight:600;width:84px;justify-content:flex-end" data-ok>OK</button></div>
+    <div class="group" style="margin-top:12px">
+      ${p ? `<label class="cell"><div class="body">Heure</div><input type="time" class="picker" id="bTime" step="60" value="${p.time}" style="direction:ltr"></label>
+      <label class="cell"><div class="body">Jours</div><select class="picker" id="bDays">${opt(BK_DAYS, p.days)}</select>${I.chev}</label>`
+      : `<div class="cell"><div class="body"><div class="t">${esc(scheduleFr(j.schedule))}</div><div class="s">Planification faite dans Proxmox, gardée telle quelle</div></div></div>`}
+      <label class="cell"><div class="body">Stockage</div><select class="picker" id="bStore">${stores.map(x => `<option ${x === j?.storage ? "selected" : ""}>${esc(x)}</option>`).join("")}</select>${I.chev}</label>
+      <label class="cell"><div class="body">Garder</div><select class="picker" id="bKeep">${[3, 7, 14, 30, ...(j?.keep && ![3, 7, 14, 30].includes(j.keep) ? [j.keep] : [])].map(n => `<option value="${n}" ${n === (j?.keep || 7) ? "selected" : ""}>${n} dernières</option>`).join("")}</select>${I.chev}</label>
+      <label class="cell"><div class="body">Mode</div><select class="picker" id="bMode">${opt(BK_MODE, j?.mode || "snapshot")}</select>${I.chev}</label>
+    </div>
+    <div class="group"><label class="cell"><div class="body"><div class="t">Toutes les machines</div>${j?.exclude ? `<div class="s">sauf ${esc(String(j.exclude).replace(/,/g, ", "))} (exclusion faite dans Proxmox)</div>` : ""}</div><span class="sw"><input type="checkbox" id="bAll" ${all ? "checked" : ""} aria-label="Toutes les machines"><span></span></span></label></div>
+    <div id="bList" ${all ? "hidden" : ""}><div class="hdr">Machines</div><div class="group">
+      ${guests.map(g => `<label class="cell icon">${icoBox(g.type === "qemu" ? I.vm : I.ct, g.type === "qemu" ? "indigo" : "teal")}<div class="body"><div class="t ell">${esc(g.name || g.vmid)}</div><div class="s">${kind(g.type)} ${g.vmid}</div></div>
+        <span class="sw"><input type="checkbox" data-v="${g.vmid}" ${sel.has(g.vmid) ? "checked" : ""} aria-label="${esc(g.name || g.vmid)}"><span></span></span></label>`).join("")}</div></div>
+    <div class="ftr">Exécutée par Proxmox, même PVE Hub éteint. « Toutes les machines » inclut celles créées plus tard. Au-delà du nombre gardé, les plus anciennes sauvegardes sont supprimées.</div></div>`;
+  m.addEventListener("change", e => {
+    if (e.target.id === "bAll") { all = e.target.checked; m.querySelector("#bList").hidden = all; }
+    const v = e.target.dataset.v; if (v) e.target.checked ? sel.add(+v) : sel.delete(+v);
+  });
+  m.addEventListener("click", async e => {
+    if (e.target === m || e.target.closest("[data-cancel]")) return m.remove();
+    if (!e.target.closest("[data-ok]")) return;
+    if (!all && !sel.size) return toast("Choisis au moins une machine");
+    const body = { op: j ? "update" : "add", id: j?.id, storage: m.querySelector("#bStore").value, keep: +m.querySelector("#bKeep").value,
+      mode: m.querySelector("#bMode").value, all, vmids: [...sel], enabled: j ? j.enabled : true };
+    if (p) { body.time = m.querySelector("#bTime").value; body.days = m.querySelector("#bDays").value; } else body.raw = j.schedule;
+    if (await saveBackupJob(body)) m.remove();
+  });
+  document.body.appendChild(m);
+}
 $("#maint").addEventListener("scroll", () => $("#mnav")?.classList.toggle("scrolled", $("#maint").scrollTop > 30), { passive: true });
 function showPackages(title, pkgs) {
   const m = document.createElement("div"); m.className = "modal";
@@ -1512,7 +1561,17 @@ async function upgradeCt(vmid, snapshot = true) {
   } else toast("❌ " + (r.error || "Échec"), 6000);
 }
 $("#maint").addEventListener("click", async e => {
-  const g = e.target.closest("[data-g]"), c = e.target.closest("[data-ct]");
+  const g = e.target.closest("[data-g]"), c = e.target.closest("[data-ct]"), bj = e.target.closest("[data-bkjob]");
+  if (e.target.closest("#bkAdd")) return editBackupJob(null);
+  if (bj) {
+    const j = S.mB.jobs.find(x => x.id === bj.dataset.bkjob); if (!j) return;
+    const i = await actionSheet(esc(scheduleFr(j.schedule)), bkWho(j),
+      [{ label: "Modifier" }, { label: j.enabled ? "Mettre en pause" : "Réactiver" }, { label: "Supprimer", danger: true }]);
+    if (i === 0) editBackupJob(j);
+    if (i === 1) saveBackupJob({ op: "toggle", id: j.id, enabled: !j.enabled });
+    if (i === 2 && await confirmBox("Supprimer cette sauvegarde planifiée ?", "Les sauvegardes déjà faites sont gardées.", "Supprimer", true)) saveBackupJob({ op: "delete", id: j.id });
+    return;
+  }
   if (g) { if (findGuest(g.dataset.g)) openGuest(g.dataset.g); return; }
   if (e.target.closest("[data-host]")) {
     const hp = S.mU.host.packages;
@@ -1535,6 +1594,36 @@ $("#maint").addEventListener("click", async e => {
     if ((n && i === 2) || (!n && i === 0)) showPackages(esc(ct.name || ct.vmid), ct.packages);
   }
 });
+
+// ---------- quoi de neuf : la plus récente en premier ; l'id (date + lettre) doit croître à chaque ajout
+const CHANGES = [
+  { id: "2026-10-14c", title: "Sauvegardes", items: [
+    "Crée, modifie, mets en pause ou supprime les sauvegardes planifiées depuis Maintenance : heure, jours, machines, stockage et nombre de copies gardées.",
+    "Cette fenêtre « Quoi de neuf » après chaque mise à jour (aussi dans Réglages → Mise à jour)."] },
+  { id: "2026-10-14b", title: "Machines et confort", items: [
+    "Horaires d'allumage et d'extinction, pour une ou plusieurs machines (Serveur → Horaires).",
+    "Fiche machine : « Démarrer avec le serveur », cœurs, mémoire et agrandissement du disque.",
+    "Graphiques sur 1 h, 24 h, 7 jours ou 30 jours ; santé SMART des disques dans Maintenance.",
+    "Hermes continue de répondre app fermée, et te prévient par notification.",
+    "iPhone : plus de zoom au double appui ni sur les champs."] },
+  { id: "2026-10-14a", title: "Store, sécurité et Journal", items: [
+    "Store : installer, désinstaller (avec sauvegarde) et réinstaller des apps.",
+    "Sécurité : appareils connectés, déconnexion d'un seul appareil, mot de passe modifiable, alerte de connexion.",
+    "Journal des alertes, connexions et actions ; historique des conversations Hermes."] },
+];
+function showChanges(list) {
+  const m = document.createElement("div"); m.className = "modal";
+  m.innerHTML = `<div class="card-sheet"><div class="grab"></div><div class="shead"><span style="width:60px"></span><h2>Quoi de neuf</h2><button class="navbtn" style="font-weight:600;width:60px;justify-content:flex-end" data-close>OK</button></div>
+    ${list.map(c => `<div class="hdr">${esc(c.title)}</div><div class="group">${c.items.map(t => `<div class="cell"><div class="body" style="line-height:1.35">${esc(t)}</div></div>`).join("")}</div>`).join("")}</div>`;
+  m.addEventListener("click", e => { if (e.target === m || e.target.closest("[data-close]")) m.remove(); });
+  document.body.appendChild(m);
+  store.set("pvehub.seenChanges", CHANGES[0].id);
+}
+function maybeShowChanges() {  // une fois après une mise à jour ; jamais vu → seulement la dernière nouveauté
+  const seen = store.get("pvehub.seenChanges", "");
+  const fresh = seen ? CHANGES.filter(c => c.id > seen) : CHANGES.slice(0, 1);
+  if (fresh.length) showChanges(fresh);
+}
 
 // ---------- mise à jour
 async function checkVersion(force) {
@@ -1762,6 +1851,7 @@ const SET_SECTIONS = {
   update: () => `<div class="hdr">Mise à jour</div>
     <div class="group">
       <div class="cell"><div class="body">Version</div><div class="v" style="font-family:var(--mono);font-size:15px">${esc(S.ver?.local || "inconnue")}</div></div>
+      <button class="cell tap" id="whatsNew"><div class="body">Quoi de neuf</div>${I.chev}</button>
       ${S.ver?.available ? `<button class="cell tap act" id="doUpd" ${S.ver.can_update ? "" : "disabled style='opacity:.4'"}><div class="body">Installer la nouvelle version</div></button>`
         : `<button class="cell tap act" id="chkUpd"><div class="body">${S.ver?.error ? esc(S.ver.error) : S.ver ? "À jour · Vérifier maintenant" : "Vérifier maintenant"}</div></button>`}
     </div>
@@ -1812,6 +1902,7 @@ $("#settings").addEventListener("click", async e => {
     try { const r = await api("/api/push/test", { body: {} }); toast(`🔔 Envoyée à ${r.sent} appareil${r.sent > 1 ? "s" : ""}`); } catch (err) { toast("❌ " + err.message, 6000); }
     return;
   }
+  if (e.target.closest("#whatsNew")) return showChanges(CHANGES);
   if (e.target.closest("#doUpd")) return doUpdate();
   if (e.target.closest("#chkUpd")) { e.target.closest("#chkUpd").querySelector(".body").textContent = "Vérification…"; await checkVersion(true); return setSec("update"); }
   if (e.target.closest("#jLogins")) { closeSettings(); return openJournal("login"); }
@@ -2155,7 +2246,7 @@ async function start() {
   api("/api/schedules").then(r => { S.sched = r.items; }).catch(() => {});
   await initChats();
   openFromHash(); addEventListener("hashchange", openFromHash);
-  checkVersion(); loadMaint(); setInterval(() => document.visibilityState === "visible" && loadMaint(), 300000);
+  checkVersion(); loadMaint(); maybeShowChanges(); setInterval(() => document.visibilityState === "visible" && loadMaint(), 300000);
   setInterval(() => document.visibilityState === "visible" && checkVersion(), 3600000);  // lit le cache du serveur, GitHub n'est interrogé qu'une fois par semaine
 }
 start();

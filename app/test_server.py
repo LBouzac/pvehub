@@ -407,4 +407,26 @@ srv.r_chat_save({"id": "cafe0001", "messages": [{"role": "user", "content": "Red
                                                 {"role": "assistant", "content": "", "typing": True, "runId": "run_x"}]})
 m = srv.r_chat_get({"id": "cafe0001"})["messages"][1]
 assert m["typing"] is False and m["content"].startswith("C'est fait"), m
+# sauvegardes planifiées : calendrier Proxmox, garde, machines ; repli SSH (pvesh) si le jeton n'a pas le droit
+assert srv.bk_schedule({"time": "01:30", "days": "all"}) == "01:30" and srv.bk_schedule({"time": "21:00", "days": "week"}) == "mon..fri 21:00"
+assert srv.bk_schedule({"raw": "sat 02:00"}) == "sat 02:00"
+for bad in ({"time": "25:00", "days": "all"}, {"raw": "$(reboot)"}):
+    try:
+        srv.bk_schedule(bad); raise AssertionError(bad)
+    except srv.ApiError:
+        pass
+P = srv.backup_job_params({"time": "02:00", "days": "sun", "storage": "local", "vmids": [103, "101", "x"], "keep": 7})
+assert P["schedule"] == "sun 02:00" and P["vmid"] == "101,103" and P["prune-backups"] == "keep-last=7" and "all" not in P
+assert srv.backup_job_params({"time": "02:00", "days": "all", "storage": "local", "all": True, "keep": 3})["all"] == 1
+assert srv.keep_last("keep-daily=3,keep-last=5") == 5 and srv.keep_last(None) is None
+ssh = []
+def deny(m, path, params=None, timeout=30):
+    if m != "GET": raise srv.ApiError(403, "Proxmox : Permission check failed (/, Sys.Modify)")
+    return []
+srv.pve, srv.EXEC_ENABLED = deny, True
+srv.run_ssh = lambda cmd, timeout=60: ssh.append(cmd) or (0, "")
+srv.r_backup_job({"op": "add", "time": "01:00", "days": "all", "storage": "local", "all": True, "keep": 7})
+assert ssh[-1].startswith("pvesh create /cluster/backup ") and "--schedule 01:00" in ssh[-1] and "--prune-backups keep-last=7" in ssh[-1], ssh
+srv.r_backup_job({"op": "delete", "id": "backup-1a2b"})
+assert ssh[-1].startswith("pvesh delete /cluster/backup/backup-1a2b"), ssh
 print("ok")

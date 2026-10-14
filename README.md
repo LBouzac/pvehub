@@ -26,7 +26,7 @@ Petite app web pour piloter ton Proxmox depuis le téléphone, avec l'agent IA H
 - **Store** : environ 600 apps de la communauté et les modèles officiels TurnKey, installées en un tap, désinstallées
   avec une sauvegarde et réinstallables depuis cette sauvegarde
 - **Commandes** : lancer une commande sur l'hôte, dans un conteneur ou une VM ; gérer les tâches planifiées (crontab)
-- **Maintenance** : sauvegardes planifiées et en retard, santé des disques (SMART, usure, température), mises à jour
+- **Maintenance** : sauvegardes planifiées (créées et modifiées depuis l'app) et en retard, santé des disques (SMART, usure, température), mises à jour
   des conteneurs et des VM en un tap avec un snapshot pris juste avant
 - **Notifications** : machine arrêtée toute seule, app qui ne répond plus, disque plein, en panne ou trop chaud,
   sauvegarde en échec ou en retard, mises à jour disponibles, rapport du matin
@@ -49,7 +49,7 @@ l'écran, lui, ne se rafraîchit que lorsque l'app est ouverte.
 4. [Mettre à jour](#4-mettre-à-jour)
 5. [Accès depuis l'extérieur (Tailscale)](#5-accès-depuis-lextérieur-tailscale)
 6. [Notifications et Journal](#6-notifications-et-journal)
-7. [Machines : horaires et réglages](#7-machines--horaires-et-réglages)
+7. [Machines : horaires, réglages et sauvegardes](#7-machines--horaires-réglages-et-sauvegardes)
 8. [Store : installer de nouvelles apps](#8-store--installer-de-nouvelles-apps)
 9. [Passer d'un ancien conteneur Debian à Alpine](#9-passer-dun-ancien-conteneur-debian-à-alpine)
 10. [Modifier la configuration](#10-modifier-la-configuration)
@@ -139,6 +139,7 @@ repose la question.
 **Depuis l'app** (section Commandes activée) : quand une nouvelle version existe, un bandeau apparaît sur l'onglet
 Serveur et un point rouge sur la roue dentée. L'app vérifie une fois par semaine ; pour vérifier tout de suite :
 roue dentée → Mise à jour → **Vérifier maintenant**, puis **Installer**. L'app redémarre et la page se recharge seule.
+Une fenêtre **Quoi de neuf** résume ensuite les nouveautés (toujours consultable dans Réglages → Mise à jour).
 
 **Depuis le Shell** :
 
@@ -256,7 +257,7 @@ Onglet **Serveur** → **Journal** : l'historique de ce qui s'est passé, regrou
 Toucher un événement ouvre la machine ou l'écran concerné. Les 300 derniers événements sont gardés
 (`data/events.json`).
 
-## 7. Machines : horaires et réglages
+## 7. Machines : horaires, réglages et sauvegardes
 
 Sur la fiche d'une machine (onglet Machines → touche une machine) :
 - **Modifier les ressources** : nombre de cœurs, mémoire (en Go) et agrandissement du disque. Un conteneur applique
@@ -278,6 +279,17 @@ Sur la fiche d'une machine (onglet Machines → touche une machine) :
 - Rien n'est fait si la machine est déjà dans l'état voulu. Chaque action est notée dans le Journal, chaque échec
   aussi, comme une alerte.
 - Pour décaler une machine (dix minutes après les autres, par exemple), crée un second horaire.
+
+**Sauvegardes planifiées** (onglet Serveur → Maintenance) :
+1. **Nouvelle sauvegarde planifiée** : l'heure, les jours, le stockage, le nombre de sauvegardes à garder par machine,
+   le mode (sans arrêt, pause ou arrêt pendant la copie), puis « Toutes les machines » ou une sélection.
+2. Touche une sauvegarde pour la modifier, la mettre en pause ou la supprimer (les sauvegardes déjà faites restent).
+
+- Ce sont de vraies tâches Proxmox (Datacenter → Sauvegarde) : elles tournent même si PVE Hub est arrêté.
+- Au-delà du nombre gardé, Proxmox supprime les plus anciennes sauvegardes de la machine sur ce stockage.
+- Une planification complexe créée dans Proxmox est gardée telle quelle ; les exclusions faites dans Proxmox aussi.
+- Le jeton de l'app n'a pas le droit de modifier ces tâches : PVE Hub passe par la section Commandes (SSH). Sans
+  elle, crée-les dans l'interface Proxmox.
 
 ## 8. Store : installer de nouvelles apps
 
