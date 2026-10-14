@@ -1,1 +1,1 @@
-{"name":"PVE Hub","short_name":"PVE Hub","start_url":"/","display":"standalone","background_color":"#0f1115","theme_color":"#0f1115","icons":[{"src":"/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]}
+{"name":"PVE Hub","short_name":"PVE Hub","start_url":"/","display":"standalone","background_color":"#0f1e33","theme_color":"#0f1e33","icons":[{"src":"/icon.png","sizes":"1290x1290","type":"image/png","purpose":"any maskable"},{"src":"/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]}

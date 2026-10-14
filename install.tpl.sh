@@ -30,6 +30,9 @@ B64
   base64 -d > "$WORK/static/icon.svg"              <<'B64'
 @@ICON@@
 B64
+  base64 -d > "$WORK/static/icon.png"              <<'B64'
+@@ICONPNG@@
+B64
   base64 -d > "$WORK/static/sw.js"                 <<'B64'
 @@SW@@
 B64
@@ -41,7 +44,7 @@ push_app() {  # $1 = CTID
   # VERSION et CTID servent au bouton « Mettre à jour » de l'app
   echo "@@VERSION@@" > "$WORK/VERSION"; echo "$1" > "$WORK/CTID"
   pct push "$1" "$WORK/VERSION" /opt/pvehub/VERSION; pct push "$1" "$WORK/CTID" /opt/pvehub/CTID
-  for f in index.html manifest.webmanifest icon.svg sw.js; do pct push "$1" "$WORK/static/$f" "/opt/pvehub/static/$f"; done
+  for f in index.html manifest.webmanifest icon.svg icon.png sw.js; do pct push "$1" "$WORK/static/$f" "/opt/pvehub/static/$f"; done
 }
 
 # Redémarrage différé de 3 s : lancé depuis l'onglet Commandes, la réponse arrive avant la coupure.

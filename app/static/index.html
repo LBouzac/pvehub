@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#f2f2f7" id="themeColor">
+<meta name="theme-color" content="#eef3f9" id="themeColor">
 <script>
 // Appliqué avant le rendu pour éviter un flash de mauvais thème
 function applyTheme() {
@@ -24,34 +24,35 @@ matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme
 <title>PVE Hub</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icon.svg">
-<link rel="apple-touch-icon" href="/icon.svg">
+<link rel="apple-touch-icon" href="/icon.png">
 <style>
 :root{
-  --bg:#f2f2f7;--card:#fff;--card2:#f2f2f7;--label:#000;--label2:rgba(60,60,67,.6);--label3:rgba(60,60,67,.3);
-  --sep:rgba(60,60,67,.29);--fill:rgba(120,120,128,.12);--fill2:rgba(120,120,128,.2);
-  --blue:#007aff;--green:#34c759;--red:#ff3b30;--orange:#ff9500;--purple:#af52de;--teal:#30b0c7;--indigo:#5856d6;--gray:#8e8e93;--pink:#ff2d55;
-  --bar:rgba(249,249,249,.82);--bubble:#e9e9eb;--code:#f2f2f7;
+  --bg:#eef3f9;--card:#fff;--card2:#e3eaf3;--label:#0f1e33;--label2:rgba(15,30,51,.62);--label3:rgba(15,30,51,.3);
+  --sep:rgba(15,30,51,.16);--fill:rgba(15,30,51,.07);--fill2:rgba(15,30,51,.14);
+  --blue:#0866d0;--green:#30d158;--green-text:#157a36;--red:#ff3b30;--orange:#ff9500;--purple:#af52de;--teal:#30b0c7;--indigo:#5856d6;--gray:#8e8e93;--pink:#ff2d55;
+  --bar:rgba(238,243,249,.86);--bubble:#dde6f1;--code:#e3eaf3;
   --font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",system-ui,sans-serif;
   --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
 }
 /* le mode effectif (auto/clair/sombre) est posé en JS sur <html data-mode> */
 :root[data-mode=dark]{
-  --bg:#000;--card:#1c1c1e;--card2:#2c2c2e;--label:#fff;--label2:rgba(235,235,245,.6);--label3:rgba(235,235,245,.3);
-  --sep:rgba(84,84,88,.65);--fill:rgba(118,118,128,.24);--fill2:rgba(118,118,128,.32);
-  --blue:#0a84ff;--green:#30d158;--red:#ff453a;--orange:#ff9f0a;--purple:#bf5af2;--teal:#40c8e0;--indigo:#5e5ce6;--gray:#98989d;--pink:#ff375f;
-  --bar:rgba(22,22,22,.82);--bubble:#26252a;--code:#2c2c2e;
+  --bg:#0f1e33;--card:#2c2c2e;--card2:#3a3a3c;--label:#fff;--label2:rgba(235,235,245,.62);--label3:rgba(235,235,245,.3);
+  --sep:rgba(255,255,255,.12);--fill:rgba(118,118,128,.24);--fill2:rgba(118,118,128,.34);
+  --blue:#4da3ff;--green:#30d158;--green-text:#30d158;--red:#ff453a;--orange:#ff9f0a;--purple:#bf5af2;--teal:#40c8e0;--indigo:#5e5ce6;--gray:#98989d;--pink:#ff375f;
+  --bar:rgba(15,30,51,.86);--bubble:#2c2c2e;--code:#1c2c44;
 }
 /* couleur d'accent */
 :root{--accent:var(--blue);--on-accent:#fff}
+:root[data-mode=dark][data-accent=blue]{--on-accent:#0f1e33}  /* blanc sur #4da3ff : 2,6:1, illisible */
 :root[data-accent=indigo]{--accent:var(--indigo)}:root[data-accent=purple]{--accent:var(--purple)}:root[data-accent=pink]{--accent:var(--pink)}
 :root[data-accent=red]{--accent:var(--red)}:root[data-accent=orange]{--accent:var(--orange)}:root[data-accent=green]{--accent:var(--green)}:root[data-accent=teal]{--accent:var(--teal)}
 :root[data-accent=mono]{--accent:#000;--on-accent:#fff}:root[data-mode=dark][data-accent=mono]{--accent:#fff;--on-accent:#000}
 :root[data-accent=mono] .ico{background:var(--gray)!important}
 /* fond */
-:root[data-bg=tint]{--bg:color-mix(in srgb,var(--accent) 9%,#f2f2f7)}
-:root[data-mode=dark][data-bg=tint]{--bg:color-mix(in srgb,var(--accent) 16%,#000)}
-:root[data-bg=contrast]{--bg:#fff;--card:#f2f2f7;--card2:#e5e5ea}
-:root[data-mode=dark][data-bg=contrast]{--bg:#1c1c1e;--card:#2c2c2e;--card2:#3a3a3c}
+:root[data-bg=tint]{--bg:color-mix(in srgb,var(--accent) 9%,#eef3f9)}
+:root[data-mode=dark][data-bg=tint]{--bg:color-mix(in srgb,var(--accent) 16%,#0f1e33)}
+:root[data-bg=contrast]{--bg:#fff;--card:#eef3f9;--card2:#e3eaf3}
+:root[data-mode=dark][data-bg=contrast]{--bg:#2c2c2e;--card:#0f1e33;--card2:#1c2c44}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;background:var(--bg);color:var(--label);font:17px/1.3 var(--font);letter-spacing:-.01em;-webkit-font-smoothing:antialiased}
 body{overscroll-behavior-y:none}
@@ -222,14 +223,14 @@ canvas{width:100%;height:120px;display:block}
 .swatch i[data-c=mono]{background:linear-gradient(135deg,#000 50%,#fff 50%);box-shadow:inset 0 0 0 1px var(--sep)}
 .bgs{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:0 16px}
 .bgopt{display:flex;flex-direction:column;align-items:center;gap:8px;font-size:13px;font-weight:500}
-.bgopt .pv{width:100%;height:74px;border-radius:12px;border:2px solid transparent;display:flex;flex-direction:column;gap:6px;padding:10px;background:#f2f2f7}
+.bgopt .pv{width:100%;height:74px;border-radius:12px;border:2px solid transparent;display:flex;flex-direction:column;gap:6px;padding:10px;background:#eef3f9}
 .bgopt.on .pv{border-color:var(--accent)}
 .bgopt .pv b{height:14px;border-radius:4px;background:#fff}
-.pv[data-pv=tint]{background:color-mix(in srgb,var(--accent) 9%,#f2f2f7)!important}
-.pv[data-pv=contrast]{background:#fff!important}.pv[data-pv=contrast] b{background:#f2f2f7!important}
-:root[data-mode=dark] .bgopt .pv{background:#000}:root[data-mode=dark] .bgopt .pv b{background:#1c1c1e}
-:root[data-mode=dark] .pv[data-pv=tint]{background:color-mix(in srgb,var(--accent) 16%,#000)!important}
-:root[data-mode=dark] .pv[data-pv=contrast]{background:#1c1c1e!important}:root[data-mode=dark] .pv[data-pv=contrast] b{background:#2c2c2e!important}
+.pv[data-pv=tint]{background:color-mix(in srgb,var(--accent) 9%,#eef3f9)!important}
+.pv[data-pv=contrast]{background:#fff!important}.pv[data-pv=contrast] b{background:#eef3f9!important}
+:root[data-mode=dark] .bgopt .pv{background:#0f1e33}:root[data-mode=dark] .bgopt .pv b{background:#2c2c2e}
+:root[data-mode=dark] .pv[data-pv=tint]{background:color-mix(in srgb,var(--accent) 16%,#0f1e33)!important}
+:root[data-mode=dark] .pv[data-pv=contrast]{background:#2c2c2e!important}:root[data-mode=dark] .pv[data-pv=contrast] b{background:#0f1e33!important}
 
 /* bannières */
 .toasts{position:fixed;left:0;right:0;top:calc(8px + env(safe-area-inset-top));z-index:60;display:flex;flex-direction:column;gap:6px;align-items:center;pointer-events:none;padding:0 12px}
@@ -244,7 +245,7 @@ canvas{width:100%;height:120px;display:block}
 .chips::-webkit-scrollbar{display:none}
 .chip{background:var(--card);border-radius:16px;padding:7px 13px;font:13px var(--mono);white-space:nowrap;flex:none}
 .out{margin:0;padding:10px 16px 14px;font:12.5px/1.45 var(--mono);white-space:pre-wrap;word-break:break-word;max-height:340px;overflow-y:auto;color:var(--label)}
-.code-ok{color:var(--green);font-weight:600}.code-bad{color:var(--red);font-weight:600}
+.code-ok{color:var(--green-text);font-weight:600}.code-bad{color:var(--red);font-weight:600}
 .bigbtn{display:block;margin:12px 16px 0;width:calc(100% - 32px);height:50px;border-radius:12px;background:var(--accent);color:var(--on-accent);font-size:17px;font-weight:600}
 .bigbtn:disabled{opacity:.5}
 
@@ -267,7 +268,7 @@ canvas{width:100%;height:120px;display:block}
 .ibtn{flex:1 1 auto;min-width:46%;height:36px;border-radius:9px;background:var(--fill);color:var(--accent);font-size:15px;font-weight:600}
 .ibtn.pri{background:var(--accent);color:var(--on-accent)}
 .ibtn.no{color:var(--red)}
-.done{font-size:13px;color:var(--green);font-weight:600;margin-top:8px}
+.done{font-size:13px;color:var(--green-text);font-weight:600;margin-top:8px}
 .done.no{color:var(--red)}
 .composer{position:fixed;left:0;right:0;bottom:calc(50px + env(safe-area-inset-bottom));z-index:19;padding:6px 10px;display:flex;gap:8px;align-items:flex-end;
   background:var(--bar);-webkit-backdrop-filter:saturate(180%) blur(20px);backdrop-filter:saturate(180%) blur(20px);border-top:.5px solid var(--sep)}
@@ -287,12 +288,80 @@ canvas{width:100%;height:120px;display:block}
 #login h1{font-size:28px;margin:0 0 24px}
 #login input{width:100%;height:50px;border-radius:12px;border:0;background:var(--card);padding:0 16px;outline:0;font-size:17px}
 #login .bigbtn{margin:12px 0 0;width:100%}
+
+/* style « carré, ombre floue légère » */
+:root{--edge:rgba(15,30,51,.10);--soft:0 6px 20px rgba(15,30,51,.07)}
+:root[data-mode=dark]{--edge:rgba(255,255,255,.08);--soft:0 8px 24px rgba(0,0,0,.28)}
+.group,.tile,.actions button{border-radius:6px;box-shadow:0 0 0 1px var(--edge),var(--soft)}
+.inline,.chip{border-radius:6px;box-shadow:0 0 0 1px var(--edge)}
+.bigbtn,.ibtn{border-radius:4px}
+.seg,.tfsel,.search{border-radius:5px}
+.seg button,.tfsel button{border-radius:3px}
+.seg button.on,.tfsel button.on{box-shadow:0 0 0 1px var(--edge)}
+.ico{border-radius:4px}
+.app .ai{border-radius:10px;box-shadow:0 0 0 1px var(--edge)}
+.app.add .ai{box-shadow:none}
+.msg{border-radius:10px}.msg.user{border-bottom-right-radius:2px}.msg.assistant{border-bottom-left-radius:2px}
+.msg pre,.msg code,.tools span,.pill{border-radius:3px}
+.composer textarea,.send{border-radius:6px}
+.bar,.bar i{border-radius:0}
+#login .logo{border-radius:14px;box-shadow:0 0 0 1px var(--edge)}
+.card-sheet{border-radius:8px 8px 0 0}.as-g,.as-btn.cancel,.alert{border-radius:8px}
+@media (min-width:700px){.card-sheet{border-radius:8px}}
+
+/* portable (≥ 900 px) : barre latérale, contenu élargi, colonnes */
+.side-brand,.side-foot,.desk{display:none}
+.cell.sel{background:var(--fill)}
+.dcol.l>.hdr:first-child{margin-top:22px}
+@media (min-width:900px){
+  .tabbar{top:0;bottom:0;right:auto;width:240px;flex-direction:column;gap:4px;padding:24px 14px;background:var(--card2);-webkit-backdrop-filter:none;backdrop-filter:none;
+    border-top:0;border-right:.5px solid var(--sep);padding-inline:14px}
+  .tabbar button{flex:none;flex-direction:row;justify-content:flex-start;gap:10px;padding:9px 12px;border-radius:4px;font-size:15px;color:var(--label)}
+  .tabbar button svg{width:20px;height:20px;color:var(--label2)}
+  .tabbar button.on{background:var(--fill);color:var(--accent);font-weight:600}
+  .tabbar button.on svg{color:var(--accent)}
+  .side-brand{display:flex;align-items:center;gap:10px;padding:0 10px 18px;font-weight:700;font-size:19px}
+  .side-brand img{width:34px;height:34px;border-radius:6px}
+  .side-foot{display:block;margin-top:auto;padding:12px}
+  .desk{display:block}
+  #nav{margin-left:240px;padding-inline:max(32px,calc((100% - 240px - 1120px) / 2))}
+  main{margin-left:240px;max-width:none;padding:0 40px 48px}
+  main>section{max-width:1120px;margin:0 auto}
+  .push{left:240px;padding-inline:max(0px,calc((100% - 240px - 1120px) / 2))}
+  main .group,main .tiles,main .search,main .seg,main .actions{margin-left:0;margin-right:0}
+  main .hdr,main .ftr{margin-left:16px;margin-right:16px}
+  main .large{margin-left:0;margin-right:0}
+  /* Serveur */
+  #v-dash .tiles{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .dcols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:28px;align-items:start;margin-top:8px}
+  .dcol.l{grid-column:1;grid-row:1}.dcol.r{grid-column:2;grid-row:1}
+  .dcol.r>.group:first-of-type{margin-top:0!important}
+  /* Machines : liste à gauche, fiche à droite */
+  .gsplit{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,3fr);gap:28px;align-items:start}
+  #gPanel #sheet{position:sticky;top:52px;inset:auto;transform:none;transition:none;z-index:auto!important;max-height:calc(100vh - 72px);padding:4px 16px 0;
+    background:var(--card);border-radius:6px;box-shadow:0 0 0 1px var(--edge),var(--soft)}
+  #gPanel #sheet:empty{display:grid;place-items:center;min-height:300px;color:var(--label2);font-size:15px}
+  #gPanel #sheet:empty::before{content:"Choisis une machine dans la liste"}
+  #gPanel #gnav{display:none}
+  #gPanel .large{margin-top:16px}
+  #gPanel .group,#gPanel .tile,#gPanel .actions button{background:var(--bg);box-shadow:0 0 0 1px var(--edge)}
+  /* Hermes */
+  #v-chat{max-width:820px}
+  #chat{padding:0 0 24px}
+  .msg{max-width:70%}
+  .composer{position:sticky;bottom:16px;left:auto;right:auto;border:.5px solid var(--sep);border-radius:6px}
+  /* Apps */
+  #v-apps .appgrid{grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:28px 12px;background:var(--card);padding:20px;border-radius:6px;box-shadow:0 0 0 1px var(--edge),var(--soft)}
+  #v-apps .app .ai{width:84px;height:84px;border-radius:10px;font-size:34px}
+  #v-apps .app .st{right:calc(50% - 48px);border-color:var(--card)}
+  #v-apps .app .an{font-size:14px}
+}
 </style>
 </head>
 <body>
 
 <div id="login" class="hide">
-  <img class="logo" src="/icon.svg" alt="">
+  <img class="logo" src="/icon.png" alt="">
   <h1>PVE Hub</h1>
   <form id="loginForm"><input id="pw" type="password" placeholder="Mot de passe" autocomplete="current-password" aria-label="Mot de passe">
   <button class="bigbtn">Se connecter</button></form>
@@ -305,9 +374,11 @@ canvas{width:100%;height:120px;display:block}
     <section id="v-dash"></section>
     <section id="v-guests" class="hide">
       <h1 class="large">Machines</h1>
+      <div class="gsplit"><div>
       <div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="search" type="search" placeholder="Rechercher" aria-label="Rechercher une machine"></div>
       <div class="seg" id="filters"></div>
       <div class="group" id="guestList"></div>
+      </div><div id="gPanel" class="desk"></div></div>
     </section>
     <section id="v-apps" class="hide"></section>
     <section id="v-exec" class="hide"></section>
@@ -322,11 +393,13 @@ canvas{width:100%;height:120px;display:block}
     </section>
   </main>
   <nav class="tabbar">
+    <div class="side-brand"><img src="/icon.png" alt="">PVE Hub</div>
     <button data-v="dash" class="on"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 4.5A1.5 1.5 0 0 1 5.5 3h13A1.5 1.5 0 0 1 20 4.5v4A1.5 1.5 0 0 1 18.5 10h-13A1.5 1.5 0 0 1 4 8.5zm0 11A1.5 1.5 0 0 1 5.5 14h13a1.5 1.5 0 0 1 1.5 1.5v4a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 19.5zM7 7.5a1 1 0 1 0 0-2 1 1 0 0 0 0 2m0 11a1 1 0 1 0 0-2 1 1 0 0 0 0 2"/></svg>Serveur</button>
     <button data-v="guests"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.2 20.5 7v10L12 21.8 3.5 17V7zm0 2.3L6 7.9l6 3.4 6-3.4zM5.5 9.6v6.2l5.5 3.1v-6.2zm13 0L13 12.7v6.2l5.5-3.1z"/></svg>Machines</button>
     <button data-v="apps"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="8" height="8" rx="2.5"/><rect x="13" y="3" width="8" height="8" rx="2.5"/><rect x="3" y="13" width="8" height="8" rx="2.5"/><rect x="13" y="13" width="8" height="8" rx="2.5"/></svg>Apps</button>
     <button data-v="exec"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4" width="19" height="16" rx="3" fill="currentColor" stroke="none"/><path d="m7 9 3 3-3 3M12.5 15H17" stroke="var(--bar)" stroke-width="2"/></svg>Commandes</button>
     <button data-v="chat"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3c5 0 9 3.4 9 7.6s-4 7.6-9 7.6c-.9 0-1.8-.1-2.6-.3L5 20.5l.9-3.9C4.1 15.2 3 13 3 10.6 3 6.4 7 3 12 3"/></svg>Hermes</button>
+    <div class="side-foot"><span class="live" id="liveSide"><i></i>en direct</span></div>
   </nav>
 </div>
 
@@ -507,6 +580,7 @@ function applyHermes() {
 }
 function setView(v) {
   S.view = v;
+  if (v !== "guests" && S.guest && desk.matches) closeGuest();  // la fiche fait partie de l'onglet Machines
   document.querySelectorAll(".tabbar button").forEach(b => b.classList.toggle("on", b.dataset.v === v));
   ["dash", "guests", "apps", "exec", "chat"].forEach(k => $("#v-" + k).classList.toggle("hide", k !== v));
   $("#navTitle").textContent = TITLES[v];
@@ -550,15 +624,19 @@ function renderDash() {
     ${S.ver?.available ? `<div class="group" style="margin-bottom:14px"><button class="cell icon tap" id="updBanner">${icoBox(I.backup, "accent")}
       <div class="body"><div class="t">Mise à jour disponible</div><div class="s">${S.ver.can_update ? "Touche pour installer la nouvelle version" : esc(S.ver.why_not)}</div></div>${I.chev}</button></div>` : ""}
     <div class="tiles">
-      <button class="tile" onclick="setView('guests')"><div class="k" style="color:var(--green)">${I.play}Actives</div><div class="n">${run}<small> / ${real.length}</small></div></button>
+      <button class="tile" onclick="setView('guests')"><div class="k" style="color:var(--green-text)">${I.play}Actives</div><div class="n">${run}<small> / ${real.length}</small></div></button>
       <div class="tile"><div class="k" style="color:var(--orange)">${I.cpu}CPU</div><div class="n">${cpu.toFixed(0)}<small> %</small></div>${bar(cpu)}</div>
       <div class="tile"><div class="k" style="color:var(--blue)">${I.mem}Mémoire</div><div class="n">${pct(mem, maxmem).toFixed(0)}<small> %</small></div>${bar(pct(mem, maxmem))}</div>
       <div class="tile"><div class="k" style="color:var(--purple)">${I.disk}Stockage</div><div class="n">${st.length ? pct(st.reduce((a, s) => a + s.disk, 0), st.reduce((a, s) => a + s.maxdisk, 0)).toFixed(0) : "–"}<small> %</small></div>${st.length ? bar(pct(st.reduce((a, s) => a + s.disk, 0), st.reduce((a, s) => a + s.maxdisk, 0))) : ""}</div>
     </div>`;
-  h += `<div class="group" style="margin-top:14px"><button class="cell icon tap" id="maintBtn">${icoBox(I.wrench.replace(/width="12" height="12"/, ""), "orange")}
+  h += `<div class="dcols"><div class="dcol r"><div class="hdr desk">À surveiller</div><div class="group" style="margin-top:14px"><button class="cell icon tap" id="maintBtn">${icoBox(I.wrench.replace(/width="12" height="12"/, ""), "orange")}
     <div class="body"><div class="t">Maintenance</div><div class="s">${esc(maintSummary())}</div></div>${maintAlert() ? '<span class="dot" style="background:var(--orange)"></span>' : ""}${I.chev}</button>
     <button class="cell icon tap" id="journalBtn">${icoBox(I.bell, "red")}<div class="body"><div class="t">Journal</div><div class="s">Alertes, connexions et actions</div></div>${I.chev}</button>
     <button class="cell icon tap" id="schedBtn">${icoBox(I.power, "indigo")}<div class="body"><div class="t">Horaires</div><div class="s">${S.sched?.length ? `${S.sched.filter(x => x.enabled).length} actif${S.sched.filter(x => x.enabled).length > 1 ? "s" : ""} sur ${S.sched.length}` : "Allumer ou éteindre des machines à heure fixe"}</div></div>${I.chev}</button></div>`;
+  const act = real.filter(g => g.status === "running").sort((a, b) => (b.cpu || 0) - (a.cpu || 0)).slice(0, 6);
+  h += `<div class="desk"><div class="hdr"><span class="grow">Machines actives</span><button id="allGuests">Tout voir</button></div><div class="group">
+    ${act.map(g => `<button class="cell tap" data-gid="${esc(g.id)}"><span class="dot running"></span><div class="body"><div class="t ell">${esc(g.name || g.vmid)}</div></div>
+      <span class="v" style="font-size:15px">${kind(g.type)} ${g.vmid} · CPU ${((g.cpu || 0) * 100).toFixed(0)} %</span></button>`).join("") || `<div class="cell"><div class="body mute">Aucune machine allumée</div></div>`}</div></div></div><div class="dcol l">`;
   for (const n of nodes) {
     const c = (n.cpu || 0) * 100;
     h += `<div class="hdr"><span class="grow">Nœud ${esc(n.node)}</span></div><div class="group">
@@ -571,7 +649,10 @@ function renderDash() {
   }
   if (st.length) h += `<div class="hdr">Stockage</div><div class="group">` + st.map(s =>
     `<div class="cell"><div class="body"><div class="row"><span class="grow">${esc(s.storage)}${nodes.length > 1 ? ` <span class="mute">· ${esc(s.node)}</span>` : ""}</span><span class="mute">${fb(s.disk)} / ${fb(s.maxdisk)}</span></div>${bar(pct(s.disk, s.maxdisk))}</div></div>`).join("") + `</div>`;
+  h += `</div></div>`;
   $("#v-dash").innerHTML = h;
+  $("#allGuests").onclick = () => setView("guests");
+  $("#v-dash").querySelectorAll("[data-gid]").forEach(b => b.onclick = () => openGuest(b.dataset.gid));
   $("#maintBtn").onclick = openMaint;
   $("#journalBtn").onclick = () => openJournal();
   $("#schedBtn").onclick = openSchedView;
@@ -598,7 +679,7 @@ function renderGuests() {
     .sort((a, b) => (b.status === "running") - (a.status === "running") || a.vmid - b.vmid);
   $("#guestList").innerHTML = list.length ? list.map(g => {
     const on = g.status === "running";
-    return `<button class="cell icon tap" data-id="${esc(g.id)}">${icoBox(g.type === "qemu" ? I.vm : I.ct, g.type === "qemu" ? "indigo" : "teal")}
+    return `<button class="cell icon tap${g.id === S.guest && desk.matches ? " sel" : ""}" data-id="${esc(g.id)}">${icoBox(g.type === "qemu" ? I.vm : I.ct, g.type === "qemu" ? "indigo" : "teal")}
       <div class="body"><div class="row" style="gap:8px"><span class="t ell">${esc(g.name || "sans nom")}</span>${g.template ? '<span class="pill">modèle</span>' : ""}</div>
       <div class="s ell">${kind(g.type)} ${g.vmid} · ${on ? `CPU ${((g.cpu || 0) * 100).toFixed(0)} % · RAM ${fb(g.mem)}` : STATUS[g.status] || g.status}</div></div>
       <span class="dot ${g.status}"></span>${I.chev}</button>`;
@@ -611,12 +692,29 @@ $("#guestList").onclick = e => { const it = e.target.closest("[data-id]"); if (i
 // ---------- détail machine
 const findGuest = id => S.ov?.guests.find(g => g.id === id);
 let guestRrd = [], guestSnaps = null, guestBk = null, guestCfg = null;
+// portable : la fiche s'affiche à droite de la liste au lieu d'une vue poussée
+const desk = matchMedia("(min-width:900px)");
+function placeSheet() {
+  const sh = $("#sheet");
+  if (desk.matches) { if (sh.parentNode !== $("#gPanel")) { $("#gPanel").appendChild(sh); if (!S.guest) sh.innerHTML = ""; } }
+  else if (sh.parentNode === $("#gPanel")) document.body.insertBefore(sh, $("#toasts"));
+}
+desk.addEventListener("change", () => { placeSheet(); if (S.ov) render(); });
 function openGuest(id) {
+  if (desk.matches) {
+    if (S.maintOpen) closeMaint(); if (S.jOpen) closeJournal(); if (S.schOpen) closeSchedView();
+    if (S.storeOpen) closeStore(); if (S.cOpen) closeChats(); if (S.setOpen) closeSettings();
+    if (S.view !== "guests") setView("guests");
+  }
   S.guest = id; guestRrd = []; guestSnaps = guestBk = guestCfg = null;
   $("#sheet").scrollTop = 0; $("#sheet").classList.add("open"); history.pushState({ g: id }, "");
   renderGuest(); loadGuestExtras();
+  if (desk.matches) renderGuests();
 }
-function closeGuest() { S.guest = null; $("#sheet").classList.remove("open"); }
+function closeGuest() {
+  S.guest = null; $("#sheet").classList.remove("open");
+  if (desk.matches) { $("#sheet").innerHTML = ""; if (S.view === "guests") renderGuests(); }
+}
 addEventListener("popstate", () => { if (S.setOpen) closeSettings(); else if (S.guest) closeGuest(); else if (S.maintOpen) closeMaint(); else if (S.storeOpen) closeStore(); else if (S.jOpen) closeJournal(); else if (S.schOpen) closeSchedView(); else if (S.cOpen) closeChats(); });
 
 function renderGuest() {
@@ -1597,6 +1695,9 @@ $("#maint").addEventListener("click", async e => {
 
 // ---------- quoi de neuf : la plus récente en premier ; l'id (date + lettre) doit croître à chaque ajout
 const CHANGES = [
+  { id: "2026-10-14d", title: "Nouveau design", items: [
+    "Nouveau logo et nouvelles couleurs, en clair comme en sombre.",
+    "Sur ordinateur : barre latérale, tableau de bord sur deux colonnes, fiche machine à côté de la liste."] },
   { id: "2026-10-14c", title: "Sauvegardes", items: [
     "Crée, modifie, mets en pause ou supprime les sauvegardes planifiées depuis Maintenance : heure, jours, machines, stockage et nombre de copies gardées.",
     "Cette fenêtre « Quoi de neuf » après chaque mise à jour (aussi dans Réglages → Mise à jour)."] },
@@ -2214,12 +2315,12 @@ let timer;
 async function refresh() {
   try {
     S.ov = await api("/api/overview"); applyHermes();
-    $("#live")?.classList.remove("off"); $("#live") && ($("#live").lastChild.textContent = "en direct");
+    for (const l of [$("#live"), $("#liveSide")]) if (l) { l.classList.remove("off"); l.lastChild.textContent = "en direct"; }
     if (S.view !== "chat" && S.view !== "apps") render();
     if (S.view === "apps" && Date.now() - S.appsAt > 30000) loadApps();
     if (S.guest) renderGuest();
   } catch (e) {
-    if (e.message !== "Non connecté" && $("#live")) { $("#live").classList.add("off"); $("#live").lastChild.textContent = "hors ligne"; }
+    if (e.message !== "Non connecté") for (const l of [$("#live"), $("#liveSide")]) if (l) { l.classList.add("off"); l.lastChild.textContent = "hors ligne"; }
   }
 }
 function loop() { clearInterval(timer); if (document.visibilityState === "visible") { refresh(); timer = setInterval(refresh, 5000); } }
@@ -2239,6 +2340,7 @@ $("#loginForm").onsubmit = async e => {
   catch (err) { $("#loginErr").textContent = err.message; }
 };
 async function start() {
+  placeSheet();
   try { S.ov = await api("/api/overview"); } catch (e) { if (e.message === "Non connecté") return; }
   $("#login").classList.add("hide"); $("#app").classList.remove("hide");
   applyHermes(); setView(S.view); loop();
