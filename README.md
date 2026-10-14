@@ -17,27 +17,29 @@ Petite app web pour piloter ton Proxmox depuis le téléphone, avec l'agent IA H
 </p>
 <p align="center"><sub>Serveur · Machines · Apps · Hermes (thème sombre) · Store · Journal · version ordinateur — données de démonstration</sub></p>
 
-- **Serveur** : CPU, RAM, disque, stockage, graphiques sur 1 h, 24 h, 7 jours ou 30 jours
-- **Machines** (VM et conteneurs) : démarrer, éteindre, redémarrer, forcer l'arrêt, snapshots, sauvegardes, démarrage automatique avec le serveur, horaires
-  d'allumage et d'extinction, pour une ou plusieurs machines à la fois (Serveur → Horaires), cœurs, mémoire et agrandissement du disque
+- **Serveur** : CPU, mémoire, disques et stockages, graphiques sur 1 h, 24 h, 7 jours ou 30 jours
+- **Machines** (VM et conteneurs) : démarrer, éteindre, redémarrer, snapshots, sauvegardes et restauration ;
+  changer les cœurs et la mémoire, agrandir le disque ; démarrage automatique avec le serveur
+- **Horaires** : allumer ou éteindre une ou plusieurs machines à heure fixe (« éteindre les conteneurs à 21 h »)
 - **Apps** : tes services web (Home Assistant, Jellyfin…) en grille d'icônes, détectés automatiquement, avec un point
-  vert s'ils répondent ; renommer, changer l'adresse, masquer, ajouter tes propres liens
-- **Store** : installer de nouvelles apps — environ 600 scripts de la communauté (Home Assistant, Jellyfin, Pi-hole…)
-  et les modèles officiels TurnKey de Proxmox — avec recherche, catégories et suivi de l'installation en direct
-- **Commandes** : lancer une commande sur l'hôte, dans un conteneur ou une VM, et voir le résultat
-- **Tâches planifiées** : la crontab de l'hôte et de chaque conteneur, en clair (« Tous les jours à 03:00 »)
-- **Maintenance** : sauvegardes planifiées, ancienneté de la dernière sauvegarde de chaque machine, paquets à mettre
-  à jour, mise à jour d'un conteneur ou d'une VM (avec l'agent QEMU) en un tap, avec un snapshot pris juste avant
-- **Hermes** : il connaît l'état du serveur et peut proposer des actions que tu valides d'un tap ; il te demande
-  l'autorisation avant ses commandes sensibles
-- **Notifications** sur le téléphone : machine arrêtée toute seule, app qui ne répond plus, disque plein, disque en panne ou trop chaud, sauvegarde en échec ou en retard,
-  résumé hebdomadaire des mises à jour
-- **Rapport du matin** : chaque jour à l'heure choisie, Hermes résume l'état du serveur en une notification ;
-  un tap l'ouvre dans la conversation pour lui répondre
-- **Mise à jour de l'app** en un tap, thèmes clair/sombre, couleurs au choix
+  vert s'ils répondent
+- **Store** : environ 600 apps de la communauté et les modèles officiels TurnKey, installées en un tap, désinstallées
+  avec une sauvegarde et réinstallables depuis cette sauvegarde
+- **Commandes** : lancer une commande sur l'hôte, dans un conteneur ou une VM ; gérer les tâches planifiées (crontab)
+- **Maintenance** : sauvegardes planifiées et en retard, santé des disques (SMART, usure, température), mises à jour
+  des conteneurs et des VM en un tap avec un snapshot pris juste avant
+- **Notifications** : machine arrêtée toute seule, app qui ne répond plus, disque plein, en panne ou trop chaud,
+  sauvegarde en échec ou en retard, mises à jour disponibles, rapport du matin
+- **Journal** : l'historique des alertes, des connexions et des actions
+- **Hermes** (facultatif) : un assistant IA qui connaît l'état du serveur, propose des actions que tu valides d'un tap,
+  garde l'historique des conversations et enquête sur une alerte d'un appui (« Demander à Hermes »)
+- **Sécurité** : appareils connectés et déconnexion à distance, mot de passe modifiable, alerte en cas de mot de passe
+  incorrect
+- **Confort** : mise à jour de l'app en un tap, thèmes clair et sombre, couleurs au choix, version ordinateur
 
-Ultra léger : un conteneur Alpine Linux (64 Mo de RAM alloués, environ 30 Mo utilisés, 1 Go de disque),
-Python seul, aucune dépendance. L'app ne rafraîchit les données que lorsqu'elle est ouverte à l'écran.
+Ultra léger : un conteneur Alpine Linux (64 Mo de RAM alloués, environ 30 Mo utilisés, 1 Go de disque), Python et deux
+petits paquets (chiffrement des notifications et fuseaux horaires). Le serveur surveille en continu pour les alertes ;
+l'écran, lui, ne se rafraîchit que lorsque l'app est ouverte.
 
 ## Sommaire
 
@@ -46,13 +48,14 @@ Python seul, aucune dépendance. L'app ne rafraîchit les données que lorsqu'el
 3. [Brancher Hermes](#3-brancher-hermes)
 4. [Mettre à jour](#4-mettre-à-jour)
 5. [Accès depuis l'extérieur (Tailscale)](#5-accès-depuis-lextérieur-tailscale)
-   - [Notifications sur le téléphone](#notifications-sur-le-téléphone)
-   - [Store : installer de nouvelles apps](#store--installer-de-nouvelles-apps)
-6. [Passer d'un ancien conteneur Debian à Alpine](#6-passer-dun-ancien-conteneur-debian-à-alpine)
-7. [Modifier la configuration](#7-modifier-la-configuration)
-8. [Dépannage](#8-dépannage)
-9. [Désinstaller](#9-désinstaller)
-10. [Sécurité](#10-sécurité)
+6. [Notifications et Journal](#6-notifications-et-journal)
+7. [Machines : horaires et réglages](#7-machines--horaires-et-réglages)
+8. [Store : installer de nouvelles apps](#8-store--installer-de-nouvelles-apps)
+9. [Passer d'un ancien conteneur Debian à Alpine](#9-passer-dun-ancien-conteneur-debian-à-alpine)
+10. [Modifier la configuration](#10-modifier-la-configuration)
+11. [Dépannage](#11-dépannage)
+12. [Désinstaller](#12-désinstaller)
+13. [Sécurité](#13-sécurité)
 
 Toutes les commandes se lancent dans le **Shell de l'hôte Proxmox** (interface web → ton nœud → **Shell**), sauf
 mention contraire. Remplace `<ID>` par l'ID du conteneur PVE Hub.
@@ -69,13 +72,14 @@ mention contraire. Remplace `<ID>` par l'ID du conteneur PVE Hub.
    - **URL et clé de Hermes** : laisse vide si tu n'utilises pas Hermes (voir [section 3](#3-brancher-hermes)) ;
    - **Mot de passe de l'app** : un mot de passe aléatoire est proposé, note-le ;
    - **Section Commandes** : « o » pour pouvoir lancer des commandes, gérer les tâches planifiées, les mises à jour
-     et mettre à jour l'app depuis le téléphone (voir [Sécurité](#10-sécurité)).
+     et mettre à jour l'app depuis le téléphone (voir [Sécurité](#13-sécurité)).
 3. À la fin, le script affiche l'**adresse** (`http://IP:8080`) et le **mot de passe**.
 4. Sur le téléphone : ouvre l'adresse dans Safari (ou Chrome), connecte-toi, puis **Partager → Sur l'écran d'accueil**.
    L'app s'ouvre ensuite en plein écran, comme une vraie app.
 
 Ce que fait le script : il crée l'utilisateur Proxmox `pvehub@pve` avec un jeton API (rôles PVEVMAdmin,
-PVEDatastoreUser, PVEAuditor), un conteneur Alpine non privilégié, et installe l'app comme service.
+PVEDatastoreUser, PVEAuditor et PVESDNUser, plus le droit de télécharger des modèles sur les stockages), un
+conteneur Alpine non privilégié, et installe l'app comme service.
 
 ## 2. Retrouver l'ID et l'IP du conteneur
 
@@ -101,7 +105,7 @@ modèle local…), choisis-la comme modèle dans la configuration de Hermes : PV
    ```
 2. Redémarre `hermes gateway`.
 3. Donne l'adresse (`http://IP-de-hermes:8642`) et la clé au script d'installation, ou plus tard dans la
-   configuration de PVE Hub (voir [section 7](#7-modifier-la-configuration)).
+   configuration de PVE Hub (voir [section 10](#10-modifier-la-configuration)).
 
 La clé doit être **identique des deux côtés**, sinon le chat affiche « Hermes : 401 ». Pour la changer :
 
@@ -201,6 +205,8 @@ pct set <ID> --delete dev0      # retire /dev/net/tun ; effectif au prochain red
 
 Si `pct set` répond que `dev0` n'existe pas, ignore : le réglage n'avait pas été fait.
 
+## 6. Notifications et Journal
+
 ### Notifications sur le téléphone
 
 Les notifications ont besoin de l'adresse HTTPS (Tailscale, ci-dessus). Sur iPhone : iOS 16.4 ou plus récent.
@@ -223,8 +229,7 @@ Les notifications ont besoin de l'adresse HTTPS (Tailscale, ci-dessus). Sur iPho
      Le détail (modèle, usure, température) est dans **Maintenance → Disques** ;
    - **Sauvegardes** : une sauvegarde en échec, et chaque matin les machines incluses dans une sauvegarde planifiée
      mais pas sauvegardées depuis 7 jours ;
-   - **Résumé des mises à jour** : une fois par semaine, en matinée.
-
+   - **Résumé des mises à jour** : une fois par semaine, en matinée ;
    - **Rapport du matin** : chaque jour à l'heure choisie (heure de ton téléphone), Hermes lit l'état du serveur
      (machines, sauvegardes de la nuit, disques, mises à jour, alertes des dernières 24 h) et t'envoie l'essentiel
      en une phrase. Toucher la notification ouvre le rapport complet dans la conversation : tu peux lui répondre
@@ -239,13 +244,36 @@ la machine concernée ou l'écran Maintenance. Répète l'étape 3 sur chaque ap
 Onglet **Serveur** → **Journal** : l'historique de ce qui s'est passé, regroupé par jour, avec des filtres.
 - **Alertes** : toutes les alertes envoyées (même celles que tu as balayées) et les rapports du matin ;
 - **Connexions** : connexions réussies et mots de passe incorrects, avec l'adresse et le type d'appareil ;
-- **Actions** : apps installées ou désinstallées par le Store, mises à jour des machines et de PVE Hub,
-  appareils déconnectés, changement de mot de passe.
+- **Actions** : apps installées, désinstallées ou réinstallées par le Store, mises à jour des machines et de
+  PVE Hub, allumages et extinctions programmés, appareils déconnectés, changement de mot de passe.
 
 Toucher un événement ouvre la machine ou l'écran concerné. Les 300 derniers événements sont gardés
 (`data/events.json`).
 
-## Store : installer de nouvelles apps
+## 7. Machines : horaires et réglages
+
+Sur la fiche d'une machine (onglet Machines → touche une machine) :
+- **Modifier les ressources** : nombre de cœurs, mémoire (en Go) et agrandissement du disque. Un conteneur applique
+  les changements tout de suite ; une VM allumée, à son prochain redémarrage. Agrandir un disque est définitif : Proxmox
+  ne sait pas le réduire. Dans une VM, il faut parfois encore étendre la partition depuis son système.
+- **Options → Démarrer avec le serveur** : la machine repart toute seule après une coupure de courant ou un
+  redémarrage de l'hôte (c'est le réglage « Démarrer au boot » de Proxmox).
+- **Options → Horaires** : les horaires qui concernent cette machine.
+
+**Horaires** (onglet Serveur → **Horaires**) : allumer ou éteindre des machines à heure fixe.
+1. **Nouvel horaire** : Allumer ou Éteindre, l'heure, les jours (tous les jours, du lundi au vendredi, le week-end),
+   puis coche une ou plusieurs machines.
+2. Touche un horaire pour le modifier ou le supprimer ; l'interrupteur le met en pause.
+
+- C'est le serveur PVE Hub qui s'en charge, à l'heure de ton téléphone, même app fermée. Les horaires ne
+  s'exécutent pas si le conteneur PVE Hub est arrêté : pour une tâche critique, préfère la crontab de l'hôte
+  (onglet Commandes → Tâches planifiées). N'utilise pas les deux pour les mêmes machines.
+- « Éteindre » fait un arrêt propre (comme le bouton Éteindre) et ne déclenche pas l'alerte « Machine arrêtée ».
+- Rien n'est fait si la machine est déjà dans l'état voulu. Chaque action est notée dans le Journal, chaque échec
+  aussi, comme une alerte.
+- Pour décaler une machine (dix minutes après les autres, par exemple), crée un second horaire.
+
+## 8. Store : installer de nouvelles apps
 
 Onglet **Apps** → icône de sac en haut à droite.
 
@@ -278,7 +306,7 @@ l'adresse affichée à l'installation sert de lien.
 - Seules les apps installées par le Store proposent ce bouton ; tes autres machines ne peuvent pas être supprimées
   d'ici.
 
-## 6. Passer d'un ancien conteneur Debian à Alpine
+## 9. Passer d'un ancien conteneur Debian à Alpine
 
 Les installations d'avant octobre 2026 utilisaient Debian (128 Mo, 2 Go). Pour passer à Alpine, **depuis le Shell
 de Proxmox** (pas depuis l'onglet Commandes, qui serait coupé en route) :
@@ -297,7 +325,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/LBouzac/pvehub/main/pvehub-i
 
 Le nouveau conteneur a un **nouvel ID** : utilise-le pour les commandes suivantes (`pct list`).
 
-## 7. Modifier la configuration
+## 10. Modifier la configuration
 
 La configuration est dans `/opt/pvehub/.env`, dans le conteneur :
 
@@ -319,7 +347,7 @@ exit
 | `UPDATE_REPO` | Dépôt GitHub d'où viennent les mises à jour (pour un fork) |
 | `APP_SECRET` | Clé des sessions ; la changer déconnecte tous les appareils |
 
-## 8. Dépannage
+## 11. Dépannage
 
 Commandes utiles :
 
@@ -347,16 +375,17 @@ Anciens conteneurs Debian : `journalctl -u pvehub -n 50` et `systemctl restart p
 | Notifications « Mise à jour nécessaire » | Mets PVE Hub à jour : le module `py3-cryptography` sera installé |
 | Maintenance : « Agent QEMU absent » sur une VM | Dans la VM : `apt install qemu-guest-agent` puis `systemctl enable --now qemu-guest-agent` ; dans Proxmox, VM → Options → QEMU Guest Agent → Activé, puis redémarre la VM. Les VM Windows ne sont pas prises en charge |
 | La notification de test n'arrive pas | Le conteneur doit pouvoir joindre Internet (`web.push.apple.com` sur iPhone). Regarde le journal (« Notification refusée… »). Vérifie aussi Réglages de l'iPhone → Notifications → PVE Hub |
-| Le rapport du matin arrive à la mauvaise heure | Change l'heure une fois dans Réglages depuis le téléphone : il transmet son fuseau horaire. Mets aussi PVE Hub à jour (paquet `tzdata`) |
+| Le rapport du matin ou un horaire se déclenche à la mauvaise heure | Change l'heure du rapport (ou enregistre à nouveau un horaire) depuis le téléphone : il transmet son fuseau horaire. Mets aussi PVE Hub à jour (paquet `tzdata`) |
+| Maintenance → Disques : un disque « Inconnu » | Son boîtier (USB) ou son contrôleur RAID ne transmet pas l'état SMART à Proxmox : rien à faire côté PVE Hub |
 | Le rapport est « factuel » au lieu d'être rédigé par Hermes | Hermes n'a pas répondu à temps : regarde le journal (« Rapport : Hermes indisponible… ») et la section 3 |
 | Plus de notifications après avoir supprimé l'icône | Normal : l'abonnement est lié à l'icône. Rajoute l'app à l'écran d'accueil et réactive |
 | Store : « Permission check failed … SDN.Use » ou « … Datastore.AllocateTemplate » | Mets PVE Hub à jour : la mise à jour donne à `pvehub@pve` le droit réseau (rôle PVESDNUser) et le droit de télécharger des modèles (rôle dédié PVEHubTemplates, sur les stockages uniquement) |
 | Store : « Catalogue injoignable » | Le conteneur doit pouvoir joindre `codeload.github.com`. Réessaie avec Actualiser |
 | Store : l'installation d'un script communautaire échoue ou bloque | Le journal montre où. Relance-la depuis le Shell avec « Copier la commande » pour voir les questions éventuelles |
-| Mot de passe oublié | Dans le Shell : `pct exec <ID> -- sh -c 'rm -f /opt/pvehub/data/auth.json && rc-service pvehub restart'`. Le mot de passe redevient celui de `APP_PASSWORD` ([section 7](#7-modifier-la-configuration)) |
+| Mot de passe oublié | Dans le Shell : `pct exec <ID> -- sh -c 'rm -f /opt/pvehub/data/auth.json && rc-service pvehub restart'`. Le mot de passe redevient celui de `APP_PASSWORD` ([section 10](#10-modifier-la-configuration)) |
 | Le conteneur ne démarre pas à l'installation | `pct start <ID> --debug` et regarde les dernières lignes |
 
-## 9. Désinstaller
+## 12. Désinstaller
 
 ```bash
 pct stop <ID> && pct destroy <ID>                            # le conteneur et l'app
@@ -367,7 +396,7 @@ tailscale serve --https=8443 off                             # si tu avais publi
 
 `--follow-symlinks` est important : sur Proxmox, `authorized_keys` est un lien vers la configuration du cluster.
 
-## 10. Sécurité
+## 13. Sécurité
 
 - **Section Commandes** : la clé SSH du conteneur donne un accès root à l'hôte. Quiconque a le mot de passe de l'app
   peut donc tout faire sur le serveur. Choisis un mot de passe solide, ou désactive la section.
