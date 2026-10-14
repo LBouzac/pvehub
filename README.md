@@ -21,8 +21,8 @@ Petite app web pour piloter ton Proxmox depuis le téléphone, avec l'agent IA H
 - **Machines** (VM et conteneurs) : démarrer, éteindre, redémarrer, snapshots, sauvegardes et restauration ;
   changer les cœurs et la mémoire, agrandir le disque ; démarrage automatique avec le serveur
 - **Horaires** : allumer ou éteindre une ou plusieurs machines à heure fixe (« éteindre les conteneurs à 21 h »)
-- **Apps** : tes services web (Home Assistant, Jellyfin…) en grille d'icônes, détectés automatiquement, avec un point
-  vert s'ils répondent
+- **Apps** : toutes les apps de tes conteneurs et VM (programmes et conteneurs Docker), rangées par machine, avec
+  leur logo et un point vert si elles tournent
 - **Store** : environ 600 apps de la communauté et les modèles officiels TurnKey, installées en un tap, désinstallées
   avec une sauvegarde et réinstallables depuis cette sauvegarde
 - **Commandes** : lancer une commande sur l'hôte, dans un conteneur ou une VM ; gérer les tâches planifiées (crontab)
@@ -385,7 +385,7 @@ Anciens conteneurs Debian : `journalctl -u pvehub -n 50` et `systemctl restart p
 | La mise à jour installe l'ancienne version | Cache GitHub de 5 min : attends, ou utilise l'identifiant du commit au lieu de `main` |
 | « Erreur interne (…) » | Le message indique la cause ; envoie-le avec la fin du journal dans une issue GitHub |
 | Section Commandes « Pas encore activé » | Relance `update <ID>` depuis le Shell et réponds « o » |
-| Une app n'apparaît pas dans l'onglet Apps | La machine doit être allumée et le service écouter sur un port web. Pour une VM, l'agent QEMU doit être installé (`qemu-guest-agent`). Sinon, ajoute le lien à la main (Modifier → +) |
+| Une app n'apparaît pas dans l'onglet Apps | La section Commandes doit être activée, et la machine allumée au moins une fois depuis (une machine arrêtée garde les apps vues la dernière fois). L'app doit écouter sur un port réseau ; les services du système (SSH, cron…) sont ignorés. Pour une VM, l'agent QEMU doit être installé (`qemu-guest-agent`). Sinon, ajoute le lien à la main (Modifier → +) |
 | « cron n'est pas installé » | Dans le conteneur : `apk add cronie` (Alpine) ou `apt install cron` (Debian) |
 | « Snapshot impossible » pendant une mise à jour | Le stockage du conteneur ne gère pas les snapshots (il faut LVM-thin, ZFS ou Ceph) : l'app propose de continuer sans |
 | Réglages affiche « Tailscale installé mais pas connecté » | Voir [le nettoyage](#passer-de-loption-b-à-loption-a-nettoyage) si tu utilises le Tailscale de l'hôte |

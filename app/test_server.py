@@ -25,6 +25,22 @@ tcp        0      0 :::9000                 :::*                    LISTEN
 tcp        0      0 127.0.0.1:3000          0.0.0.0:*               LISTEN"""
 assert srv.parse_ports(NS) == {8080, 9000}, srv.parse_ports(NS)
 
+# ss -Htlnp / netstat -tlnp : nom du programme, et apps déduites (Docker, programmes connus, génériques, système ignoré)
+SSP = """LISTEN 0 4096 0.0.0.0:8096 0.0.0.0:* users:(("jellyfin",pid=90,fd=12))
+LISTEN 0 128 0.0.0.0:22 0.0.0.0:* users:(("sshd",pid=1,fd=3))
+LISTEN 0 4096 0.0.0.0:8989 0.0.0.0:* users:(("docker-proxy",pid=5,fd=4))
+LISTEN 0 511 0.0.0.0:3000 0.0.0.0:* users:(("node",pid=7,fd=20))
+LISTEN 0 511 0.0.0.0:1883 0.0.0.0:* users:(("mosquitto",pid=8,fd=5))
+LISTEN 0 511 0.0.0.0:7777 0.0.0.0:* users:(("python3",pid=9,fd=5))"""
+L = srv.parse_listen(SSP)
+assert L == {8096: "jellyfin", 22: "sshd", 8989: "docker-proxy", 3000: "node", 1883: "mosquitto", 7777: "python3"}, L
+assert srv.parse_listen("tcp        0      0 0.0.0.0:8080            0.0.0.0:*               LISTEN      55/caddy") == {8080: "caddy"}
+D = srv.parse_docker("lscr.io/linuxserver/sonarr:latest|sonarr|0.0.0.0:8989->8989/tcp, :::8989->8989/tcp\nkoenkk/zigbee2mqtt|z2m|")
+assert D == [("lscr.io/linuxserver/sonarr:latest", "sonarr", {8989}), ("koenkk/zigbee2mqtt", "z2m", set())], D
+A = {a["name"]: (a["icon"], sorted(a["ports"])) for a in srv.guest_apps("media", L, D)}
+assert A == {"Sonarr": ("sonarr", [8989]), "Zigbee2MQTT": ("zigbee2mqtt", []), "Jellyfin": ("jellyfin", [8096]),
+             "Grafana": ("grafana", [3000]), "Mosquitto": ("mosquitto", [1883]), "media": ("media", [7777])}, A
+
 for bad in ("javascript:alert(1)", "ftp://x", "http://", "x" * 400):
     try:
         srv.clean_url(bad)
@@ -146,6 +162,7 @@ assert not srv.RE_SLUG.match("jellyfin; rm -rf /") and srv.RE_SLUG.match("home-a
 # rapport du matin : une fois par jour à l'heure choisie ; un état partiel ne fait pas planter la surveillance
 import datetime, tempfile
 srv.DATA_DIR = tempfile.mkdtemp()
+srv.APPS_SEEN_FILE = os.path.join(srv.DATA_DIR, "seen.json")
 srv.EVENTS_FILE = os.path.join(srv.DATA_DIR, "events.json")
 srv.ALERTS_FILE, srv.REPORTS_FILE = os.path.join(srv.DATA_DIR, "a.json"), os.path.join(srv.DATA_DIR, "r.json")
 srv.write_json(srv.ALERTS_FILE, {"state": {"log": []}})
@@ -191,6 +208,7 @@ assert len(ev) == 35 and ev[0]["ok"] is True and ev[1]["title"] == "Mot de passe
 # store : suivi des apps installées, désinstallation (sauvegarde → arrêt → suppression), fusion dans l'onglet Apps
 srv.threading.Thread = REAL_THREAD
 srv.INSTALLED_FILE, srv.APPS_FILE = os.path.join(srv.DATA_DIR, "inst.json"), os.path.join(srv.DATA_DIR, "apps.json")
+srv.APPS_SEEN_FILE = os.path.join(srv.DATA_DIR, "seen.json")
 GUESTS = [{"vmid": 101, "node": "pve", "type": "lxc", "status": "running", "name": "hermes", "id": "lxc/101"}]
 calls = []
 def fake_pve(m, path, params=None, timeout=30):

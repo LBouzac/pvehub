@@ -2301,6 +2301,58 @@ PORT_NAMES = {8123: "Home Assistant", 8096: "Jellyfin", 32400: "Plex", 9000: "Po
               8642: "Hermes", 9091: "Transmission", 8989: "Sonarr", 7878: "Radarr", 9696: "Prowlarr",
               8384: "Syncthing", 5678: "n8n", 3001: "Uptime Kuma", 19999: "Netdata", 8000: "", 8080: ""}
 HTTPS_PORTS = {443, 8443, 9443}
+# Programme (nom du processus ou de l'image Docker, en minuscules) → (nom affiché, logo selfh.st/icons)
+KNOWN_APPS = {
+    "jellyfin": ("Jellyfin", "jellyfin"), "plex media serv": ("Plex", "plex"), "plexmediaserver": ("Plex", "plex"), "plex": ("Plex", "plex"),
+    "emby": ("Emby", "emby"), "embyserver": ("Emby", "emby"),
+    "hass": ("Home Assistant", "home-assistant"), "home-assistant": ("Home Assistant", "home-assistant"),
+    "homeassistant": ("Home Assistant", "home-assistant"),
+    "pihole-ftl": ("Pi-hole", "pi-hole"), "pihole": ("Pi-hole", "pi-hole"), "adguardhome": ("AdGuard Home", "adguard-home"),
+    "mosquitto": ("Mosquitto", "mosquitto"), "eclipse-mosquitto": ("Mosquitto", "mosquitto"), "smbd": ("Samba", "samba"),
+    "nginx": ("Nginx", "nginx"), "caddy": ("Caddy", "caddy"), "traefik": ("Traefik", "traefik"), "haproxy": ("HAProxy", "haproxy"),
+    "apache2": ("Apache", "apache"), "httpd": ("Apache", "apache"), "lighttpd": ("lighttpd", "lighttpd"),
+    "nginx-proxy-manager": ("Nginx Proxy Manager", "nginx-proxy-manager"),
+    "vaultwarden": ("Vaultwarden", "vaultwarden"), "gitea": ("Gitea", "gitea"), "forgejo": ("Forgejo", "forgejo"),
+    "grafana": ("Grafana", "grafana"), "grafana-server": ("Grafana", "grafana"), "prometheus": ("Prometheus", "prometheus"),
+    "influxd": ("InfluxDB", "influxdb"), "influxdb": ("InfluxDB", "influxdb"), "loki": ("Loki", "loki"),
+    "postgres": ("PostgreSQL", "postgresql"), "postgresql": ("PostgreSQL", "postgresql"), "mysqld": ("MySQL", "mysql"),
+    "mariadbd": ("MariaDB", "mariadb"), "mariadb": ("MariaDB", "mariadb"), "mysql": ("MySQL", "mysql"),
+    "redis-server": ("Redis", "redis"), "redis": ("Redis", "redis"), "mongod": ("MongoDB", "mongodb"), "mongo": ("MongoDB", "mongodb"),
+    "syncthing": ("Syncthing", "syncthing"), "transmission-da": ("Transmission", "transmission"),
+    "transmission": ("Transmission", "transmission"), "qbittorrent-nox": ("qBittorrent", "qbittorrent"),
+    "qbittorrent": ("qBittorrent", "qbittorrent"), "deluged": ("Deluge", "deluge"), "sabnzbd": ("SABnzbd", "sabnzbd"),
+    "sonarr": ("Sonarr", "sonarr"), "radarr": ("Radarr", "radarr"), "prowlarr": ("Prowlarr", "prowlarr"), "lidarr": ("Lidarr", "lidarr"),
+    "readarr": ("Readarr", "readarr"), "bazarr": ("Bazarr", "bazarr"), "jackett": ("Jackett", "jackett"),
+    "overseerr": ("Overseerr", "overseerr"), "jellyseerr": ("Jellyseerr", "jellyseerr"), "tautulli": ("Tautulli", "tautulli"),
+    "tailscaled": ("Tailscale", "tailscale"), "cloudflared": ("Cloudflared", "cloudflare"), "frigate": ("Frigate", "frigate"),
+    "zigbee2mqtt": ("Zigbee2MQTT", "zigbee2mqtt"), "node-red": ("Node-RED", "node-red"), "esphome": ("ESPHome", "esphome"),
+    "homebridge": ("Homebridge", "homebridge"), "portainer": ("Portainer", "portainer"), "uptime-kuma": ("Uptime Kuma", "uptime-kuma"),
+    "n8n": ("n8n", "n8n"), "immich": ("Immich", "immich"), "immich-server": ("Immich", "immich"), "ollama": ("Ollama", "ollama"),
+    "open-webui": ("Open WebUI", "open-webui"), "paperless": ("Paperless-ngx", "paperless-ngx"), "paperless-ngx": ("Paperless-ngx", "paperless-ngx"),
+    "nextcloud": ("Nextcloud", "nextcloud"), "netdata": ("Netdata", "netdata"), "cockpit-ws": ("Cockpit", "cockpit"),
+    "miniserv.pl": ("Webmin", "webmin"), "code-server": ("code-server", "visual-studio-code"), "wg-easy": ("WireGuard", "wireguard"),
+    "upsd": ("NUT", "nut"), "minio": ("MinIO", "minio"), "homepage": ("Homepage", "homepage"), "heimdall": ("Heimdall", "heimdall"),
+    "dashy": ("Dashy", "dashy"), "authelia": ("Authelia", "authelia"), "authentik": ("authentik", "authentik"),
+    "wireguard": ("WireGuard", "wireguard"), "unifi": ("UniFi", "ubiquiti-unifi"), "mealie": ("Mealie", "mealie"),
+    "freshrss": ("FreshRSS", "freshrss"), "audiobookshelf": ("Audiobookshelf", "audiobookshelf"), "navidrome": ("Navidrome", "navidrome"),
+    "photoprism": ("PhotoPrism", "photoprism"), "kavita": ("Kavita", "kavita"), "calibre-web": ("Calibre-Web", "calibre-web"),
+    "ntfy": ("ntfy", "ntfy"), "gotify": ("Gotify", "gotify"), "stirling-pdf": ("Stirling-PDF", "stirling-pdf"),
+    "it-tools": ("IT-Tools", "it-tools"), "2fauth": ("2FAuth", "2fauth"), "docker": ("Docker", "docker"),
+}
+# Ports bien connus quand le processus ne dit rien (node, python, java…)
+PORT_APPS = {8123: "hass", 8096: "jellyfin", 32400: "plex", 9443: "portainer", 9091: "transmission", 8989: "sonarr", 7878: "radarr",
+             9696: "prowlarr", 8686: "lidarr", 6767: "bazarr", 8384: "syncthing", 5678: "n8n", 3001: "uptime-kuma", 19999: "netdata",
+             1883: "mosquitto", 5432: "postgres", 3306: "mysqld", 6379: "redis-server", 27017: "mongod", 445: "smbd",
+             1880: "node-red", 6052: "esphome", 8581: "homebridge", 2283: "immich", 11434: "ollama", 9090: "prometheus",
+             3000: "grafana", 8086: "influxd", 25565: ("Minecraft", "minecraft"), 8642: ("Hermes", "hermes-agent")}
+# Services du système : jamais affichés comme des apps
+SYSTEM_PROCS = {"sshd", "sshd-session", "dropbear", "systemd", "systemd-resolve", "systemd-resolved", "systemd-network", "systemd-networkd",
+                "master", "exim4", "exim", "sendmail", "postfix", "rpcbind", "rpc.statd", "rpc.mountd", "chronyd", "ntpd", "dhclient",
+                "cupsd", "avahi-daemon", "qemu-ga", "containerd", "dockerd", "docker-proxy", "nmbd", "xinetd", "inetd", "snmpd",
+                "init", "rpc.idmapd", "kubelet", "nfsd", "lxcfs", "pvedaemon", "pveproxy", "spiceproxy", "pve-firewall"}
+# Exécutables génériques : le nom vient du port ou de la machine
+GENERIC_PROCS = {"node", "nodejs", "python", "python3", "java", "php", "php-fpm", "php-fpm8", "ruby", "dotnet", "mono", "bun",
+                 "deno", "gunicorn", "uvicorn", "beam.smp", "perl", "npm", "go", "main", "app", "server", ""}
 _scan = {"at": 0, "data": {}}
 _apps_lock = threading.Lock()
 NO_VERIFY = ssl.create_default_context()
@@ -2327,24 +2379,83 @@ def guest_ip(g):
     return None
 
 
-def parse_ports(text):
-    """Ports TCP en écoute hors localhost, depuis `ss -Htln` ou `netstat -tln` (4e colonne dans les deux)."""
-    ports = set()
+def parse_listen(text):
+    """Ports TCP en écoute hors localhost → nom du processus (vide s'il est inconnu).
+    Depuis `ss -Htlnp` (users:(("nom",…))) ou `netstat -tlnp` (« pid/nom »), la 4e colonne donnant l'adresse dans les deux."""
+    ports = {}
     for line in text.splitlines():
         cols = line.split()
-        if len(cols) < 4 or (cols[0] == "tcp" and "LISTEN" not in line):
+        if len(cols) < 4 or cols[0].startswith("udp") or (cols[0].startswith("tcp") and "LISTEN" not in line):
             continue
         host, _, port = cols[3].rpartition(":")
         if port.isdigit() and not re.match(r"^\[?(127\.|::1\]?$|localhost)", host):
-            ports.add(int(port))
+            m = re.search(r'users:\(\("([^"]+)"', line) or re.search(r"\s\d+/(\S+)\s*$", line)
+            if not ports.get(int(port)):
+                ports[int(port)] = m.group(1).strip() if m else ""
     return ports
 
 
+def parse_ports(text):
+    return set(parse_listen(text))
+
+
+def parse_docker(text):
+    """`docker ps --format '{{.Image}}|{{.Names}}|{{.Ports}}'` → [(image, nom, {ports publiés})]."""
+    out = []
+    for line in text.splitlines():
+        parts = line.strip().split("|")
+        if len(parts) >= 2 and parts[0]:
+            out.append((parts[0], parts[1], {int(p) for p in re.findall(r":(\d+)->", parts[2] if len(parts) > 2 else "")}))
+    return out
+
+
+def app_key(word):
+    """« lscr.io/linuxserver/sonarr:latest » → « sonarr » ; « Plex Media Serv » → « plex media serv »."""
+    return word.lower().rsplit("/", 1)[-1].split(":")[0].split("@")[0].strip()
+
+
+def known_app(key):
+    v = KNOWN_APPS.get(key)
+    return v if v else None
+
+
+def guest_apps(guest_name, listen, docker):
+    """Apps d'une machine : [{"name", "icon", "ports"}] depuis ses ports en écoute et ses conteneurs Docker."""
+    apps, by_port = {}, {}
+    for image, cname, ports in docker:
+        key = app_key(image)
+        name, icon = known_app(key) or known_app(app_key(cname)) or (key.replace("-", " ").title() if key else cname, key or None)
+        a = apps.setdefault(name, {"name": name, "icon": icon, "ports": set()})
+        for p in ports:
+            by_port[p] = name
+            a["ports"].add(p)
+    for port, proc in listen.items():
+        if port in by_port:
+            continue
+        key = app_key(proc)
+        if key in SYSTEM_PROCS or (port == 53 and key in ("dnsmasq", "named", "unbound", "systemd-resolve")):
+            continue
+        hit = known_app(key)
+        if not hit and (key in GENERIC_PROCS or not key):
+            pa = PORT_APPS.get(port)
+            hit = pa if isinstance(pa, tuple) else known_app(pa) if pa else None
+            if not hit and port not in NOT_WEB:
+                hit = (guest_name, app_key(guest_name).replace(" ", "-") or None)  # ex. conteneur « 2fauth » d'un script communautaire
+        if not hit and key and key not in GENERIC_PROCS:
+            hit = (proc.strip(), re.sub(r"[^a-z0-9]+", "-", key).strip("-") or None)
+        if not hit:
+            continue
+        apps.setdefault(hit[0], {"name": hit[0], "icon": hit[1], "ports": set()})["ports"].add(port)
+    return list(apps.values())
+
+
 def scan_ports(guests):
-    """Une seule connexion SSH : ports en écoute de chaque machine allumée. {"lxc/101": {8123, ...}}"""
+    """Une seule connexion SSH : ports en écoute (avec le programme) et conteneurs Docker de chaque machine allumée.
+    {"lxc/101": {"listen": {8123: "hass"}, "docker": [(image, nom, {ports})]}}"""
     if not EXEC_ENABLED or not guests:
         return {}
-    probe = "ss -Htln 2>/dev/null || netstat -tln 2>/dev/null"
+    probe = ("ss -Htlnp 2>/dev/null || netstat -tlnp 2>/dev/null || netstat -tln 2>/dev/null; echo @@docker; "
+             "command -v docker >/dev/null 2>&1 && docker ps --format '{{.Image}}|{{.Names}}|{{.Ports}}' 2>/dev/null")
     script = "".join(
         f"echo @@{g['type']}/{g['vmid']}; " + (
             f"timeout 6 pct exec {g['vmid']} -- sh -c {shlex.quote(probe)} 2>/dev/null; " if g["type"] == "lxc" else
@@ -2361,7 +2472,8 @@ def scan_ports(guests):
                     text = j.get("out-data", "") if isinstance(j, dict) else text
                 except ValueError:
                     pass
-                found[cur] = parse_ports(text)
+                listen_txt, _, dock_txt = text.partition("@@docker")
+                found[cur] = {"listen": parse_listen(listen_txt), "docker": parse_docker(dock_txt)}
             cur, buf = line[2:].strip(), []
         else:
             buf.append(line)
@@ -2408,6 +2520,13 @@ def is_up(url):
         return False
 
 
+APPS_SEEN_FILE = os.path.join(DATA_DIR, "apps_seen.json")  # dernières apps vues par machine : affichées si elle est arrêtée
+
+
+def app_url(ip, p):
+    return f"{'https' if p in HTTPS_PORTS else 'http'}://{ip}{'' if p in (80, 443) else f':{p}'}{'/web' if p == 32400 else ''}"
+
+
 def r_apps(q):
     every = all_guests()
     guests = [g for g in every if g.get("status") == "running"]
@@ -2424,43 +2543,64 @@ def r_apps(q):
         _scan.update(at=time.time(), data={"ips": ips, "ports": ports})
     ips, ports = _scan["data"].get("ips", {}), _scan["data"].get("ports", {})
     cfg = load_apps_cfg()
-    apps = []
+    apps, checks = [], []
     for g in sorted(guests, key=lambda g: g["vmid"]):
-        ip, web = ips.get(g["id"]), sorted(p for p in ports.get(g["id"], ()) if p not in NOT_WEB)
-        if not ip or not web:
+        ip, info = ips.get(g["id"]), ports.get(g["id"])
+        if isinstance(info, set):  # ancien format : de simples ports
+            info = {"listen": dict.fromkeys(info, ""), "docker": []}
+        if not info:
             continue
-        for p in web:
-            url = f"{'https' if p in HTTPS_PORTS else 'http'}://{ip}{'' if p in (80, 443) else f':{p}'}{'/web' if p == 32400 else ''}"
-            st = alive.get(str(g["vmid"]))
-            base = st["name"] if st else g.get("name") or str(g["vmid"])
-            apps.append({"id": f"{g['id']}:{p}", "name": f"{base} · {PORT_NAMES.get(p) or p}", "base": base,
-                         "url": url, "guest": f"{g['type']}/{g['vmid']}", "store": g["vmid"] if st else None})
+        st = alive.get(str(g["vmid"]))
+        gname_ = st["name"] if st else g.get("name") or str(g["vmid"])
+        found = guest_apps(gname_, info["listen"], info["docker"])
+        for a in found:
+            web = sorted(p for p in a["ports"] if p not in NOT_WEB)
+            app = {"id": f"{g['id']}:{a['icon'] or a['name']}", "name": a["name"], "icon": a["icon"], "url": None,
+                   "guest": f"{g['type']}/{g['vmid']}", "store": g["vmid"] if st else None, "old": [f"{g['id']}:{p}" for p in a["ports"]],
+                   "cands": [app_url(ip, p) for p in web] if ip else []}
+            if st and len(found) == 1:  # app du Store : le nom choisi à l'installation
+                app["name"] = st["name"]
+            apps.append(app)
     seen = {a["store"] for a in apps}
     for g in guests:  # app du Store dont aucun port n'a été détecté : on garde l'adresse affichée à l'installation
         st = alive.get(str(g["vmid"]))
         if st and st.get("url") and g["vmid"] not in seen:
-            apps.append({"id": f"store:{g['vmid']}", "name": st["name"], "url": st["url"],
+            apps.append({"id": f"store:{g['vmid']}", "name": st["name"], "url": st["url"], "icon": app_key(st["name"]).replace(" ", "-"),
                          "guest": f"{g['type']}/{g['vmid']}", "store": g["vmid"]})
+    # machines arrêtées : leurs apps vues la dernière fois, grisées
+    with _apps_lock:
+        last = read_json(APPS_SEEN_FILE, {})
+        running = {f"{g['type']}/{g['vmid']}" for g in guests}
+        for gid in {a["guest"] for a in apps}:
+            last[gid] = [{k: a[k] for k in ("id", "name", "icon", "store")} for a in apps if a["guest"] == gid]
+        known = {f"{g['type']}/{g['vmid']}" for g in every}
+        last = {k: v for k, v in last.items() if k in known}  # machine supprimée : oubliée
+        write_json(APPS_SEEN_FILE, last)
+    for gid, items in last.items():
+        if gid not in running:
+            apps += [{**a, "url": None, "guest": gid, "off": True} for a in items]
     for link in cfg["links"]:
         apps.append({**link, "custom": True})
-    for a in apps:
-        a.update({k: v for k, v in cfg["over"].get(a["id"], {}).items() if k in ("url", "hidden")})
-    visible = [a for a in apps if not a.get("hidden")]
+    for a in apps:  # réglages de l'utilisateur, y compris ceux faits avant (un id par port)
+        over = cfg["over"].get(a["id"]) or next((cfg["over"][o] for o in a.get("old", []) if o in cfg["over"]), {})
+        a.update({k: v for k, v in over.items() if k in ("url", "hidden", "name") and v})
+        if over.get("url"):
+            a["cands"] = [over["url"]]
+    def probe(a):
+        if a.get("off") or a.get("hidden"):
+            return None
+        if a.get("cands") is None:  # lien ajouté à la main, app du Store
+            return is_up(a["url"]) if a.get("url") else None
+        res = [(u, is_up(u)) for u in a["cands"]]
+        ok = next((u for u, r in res if r), None) or next((u for u, r in res if r is False), None)
+        a["url"] = ok  # aucune réponse HTTP : app sans interface web
+        return (ok is not None and any(r for _, r in res)) or (not res or all(r is None for _, r in res)) or False
     with ThreadPoolExecutor(16) as ex:
-        for a, up in zip(visible, ex.map(lambda a: is_up(a["url"]), visible)):
-            a["up"] = up
-    # un port détecté qui ne parle pas HTTP n'est pas une app (sauf si tu as saisi son adresse toi-même)
-    apps = [a for a in apps if a.get("up") is not None or a.get("hidden") or a.get("custom") or "url" in cfg["over"].get(a["id"], {})]
-    per_guest = {}
+        for a, up in zip(apps, ex.map(probe, apps)):
+            a["up"] = None if a.get("off") else up
     for a in apps:
-        per_guest[a.get("guest")] = per_guest.get(a.get("guest"), 0) + 1
-    for a in apps:
-        if a.get("up") is None and not a.get("hidden"):
-            a["up"] = False
-        if "base" in a and per_guest[a["guest"]] == 1:
-            a["name"] = a["base"]  # une seule app sur la machine : pas besoin de préciser le port
-        a.pop("base", None)
-        a["name"] = cfg["over"].get(a["id"], {}).get("name") or a["name"]  # nom choisi par l'utilisateur
+        a.pop("old", None)
+        a.pop("cands", None)
     return {"apps": apps, "scan": EXEC_ENABLED}
 
 

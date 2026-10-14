@@ -1012,24 +1012,43 @@ async function loadApps(rescan) {
   catch (e) { S.appsErr = e.message; }
   if (S.view === "apps") renderApps();
 }
+// logo : bibliothèque selfh.st (comme le Store), sinon l'icône du site si le navigateur peut la charger, sinon l'initiale
+function appImgErr(img) { if (img.dataset.alt) { img.src = img.dataset.alt; delete img.dataset.alt; } else img.remove(); }
 function appTile(a) {
   let origin = ""; try { origin = new URL(a.url).origin; } catch {}
+  const fav = origin && (location.protocol === "http:" || origin.startsWith("https:")) ? origin + "/favicon.ico" : "";
+  const src = a.icon ? CS_ICON(a.icon) : fav, alt = a.icon ? fav : "";
   const letter = esc([...a.name.trim()][0]?.toUpperCase() || "?");
-  return `<${S.appsEdit ? "button" : `a href="${esc(a.url)}" target="_blank" rel="noopener"`} class="app ${a.hidden ? "hid" : ""}" data-app="${esc(a.id)}">
-    <span class="ai" style="background:var(--${appColor(a.name)})">${letter}${origin ? `<img src="${esc(origin)}/favicon.ico" alt="" loading="lazy" onerror="this.remove()">` : ""}</span>
+  const tag = S.appsEdit ? "button" : a.url && !a.off ? `a href="${esc(a.url)}" target="_blank" rel="noopener"` : `button data-gid="${esc(a.guest || "")}"`;
+  return `<${tag} class="app ${a.hidden || a.off ? "hid" : ""}" data-app="${esc(a.id)}" title="${esc(a.url || (a.off ? "Machine arrêtée" : "Sans interface web"))}">
+    <span class="ai" style="background:var(--${appColor(a.name)})">${letter}${src ? `<img src="${esc(src)}" ${alt ? `data-alt="${esc(alt)}"` : ""} alt="" loading="lazy" onerror="appImgErr(this)">` : ""}</span>
     ${a.hidden ? "" : `<span class="st ${a.up === true ? "up" : a.up === false ? "down" : ""}"></span>`}
-    <span class="an">${esc(a.name)}</span></${S.appsEdit ? "button" : "a"}>`;
+    <span class="an">${esc(a.name)}</span></${tag.split(" ")[0]}>`;
+}
+// une section par machine (allumées d'abord), puis les liens ajoutés à la main
+function appGroups(list) {
+  const g = new Map();
+  for (const a of list) { const k = a.custom ? "links" : a.guest || "links"; if (!g.has(k)) g.set(k, []); g.get(k).push(a); }
+  const label = k => {
+    if (k === "links") return "Mes liens";
+    const m = S.ov?.guests.find(x => x.id === k);
+    return m ? `${esc(m.name || m.vmid)} <span style="text-transform:none">· ${kind(m.type)} ${m.vmid}${m.status === "running" ? "" : " · arrêtée"}</span>` : esc(k);
+  };
+  const rank = k => k === "links" ? 2 : S.ov?.guests.find(x => x.id === k)?.status === "running" ? 0 : 1;
+  return [...g.entries()].sort((a, b) => rank(a[0]) - rank(b[0]) || (parseInt(a[0].split("/")[1]) || 0) - (parseInt(b[0].split("/")[1]) || 0))
+    .map(([k, items]) => ({ label: label(k), items }));
 }
 function renderApps() {
   const el = $("#v-apps");
   if (!S.apps) { el.innerHTML = `<h1 class="large">Apps</h1><div class="empty">${S.appsErr ? esc(S.appsErr) : "Recherche des apps sur tes machines…"}</div>`; return; }
   const list = S.appsEdit ? S.apps : S.apps.filter(a => !a.hidden);
+  const groups = appGroups(list);
+  const add = S.appsEdit ? `<div class="hdr">Ajouter</div><div class="appgrid edit"><button class="app add" data-add><span class="ai">+</span><span class="an">Ajouter un lien</span></button></div>` : "";
   el.innerHTML = `<h1 class="large">Apps</h1>
-    ${list.length || S.appsEdit ? `<div class="appgrid ${S.appsEdit ? "edit" : ""}">${list.map(appTile).join("")}
-      ${S.appsEdit ? `<button class="app add" data-add><span class="ai">+</span><span class="an">Ajouter</span></button>` : ""}</div>`
-      : `<div class="empty">Aucune app web trouvée.<br>Touche « Modifier » pour ajouter un lien.</div>`}
+    ${list.length ? groups.map(gr => `<div class="hdr"><span class="grow ell">${gr.label}</span></div><div class="appgrid ${S.appsEdit ? "edit" : ""}">${gr.items.map(appTile).join("")}</div>`).join("") + add
+      : S.appsEdit ? add : `<div class="empty">Aucune app trouvée.<br>Touche « Modifier » pour ajouter un lien.</div>`}
     <div class="ftr" style="margin-top:24px">${S.appsEdit ? "Touche une app pour la renommer, changer son adresse ou la masquer. Les apps installées par le Store peuvent aussi être désinstallées."
-      : S.appsScan ? "Détectées automatiquement sur tes machines allumées. Point vert : l'app répond."
+      : S.appsScan ? "Programmes et conteneurs Docker détectés sur tes machines. Point vert : l'app tourne ; une app sans page web ouvre sa machine. Grisées : machine arrêtée."
       : "Active la section Commandes pour détecter les apps automatiquement. Tu peux aussi ajouter des liens à la main."}</div>
     ${S.appsEdit ? "" : `<div class="group" style="margin-top:16px"><button class="cell tap act" id="rescan"><div class="body">Rechercher de nouvelles apps</div></button></div>`}`;
   $("#rescan") && ($("#rescan").onclick = () => { S.apps = null; renderApps(); loadApps(true); });
@@ -1038,6 +1057,8 @@ async function saveApp(body) {
   try { await api("/api/apps/save", { body }); await loadApps(); } catch (e) { toast("❌ " + e.message); }
 }
 $("#v-apps").addEventListener("click", async e => {
+  const gb = !S.appsEdit && e.target.closest("[data-gid]");
+  if (gb) { if (findGuest(gb.dataset.gid)) openGuest(gb.dataset.gid); return; }
   if (!S.appsEdit) return;
   if (e.target.closest("[data-add]")) {
     const v = await alertForm("Ajouter un lien", "Une app hors de Proxmox, ta box…", [{ name: "name", ph: "Nom" }, { name: "url", ph: "http://192.168.1.1" }]);
@@ -1049,10 +1070,10 @@ $("#v-apps").addEventListener("click", async e => {
   const btns = [{ label: "Renommer" }, { label: "Changer l'adresse" }, { label: a.hidden ? "Afficher" : "Masquer" }];
   if (a.custom) btns.push({ label: "Supprimer le lien", danger: true });
   if (a.store) btns.push({ label: "Désinstaller l'app…", danger: true });
-  const i = await actionSheet(esc(a.name), esc(a.url), btns);
+  const i = await actionSheet(esc(a.name), esc(a.url || "Sans interface web"), btns);
   if (a.store && i === btns.length - 1) return uninstallApp(a);
   if (i === 0) { const v = await alertForm("Renommer", "Laisse vide pour revenir au nom d'origine.", [{ name: "name", ph: "Nom", value: a.name }]); if (v) saveApp({ op: "edit", id: a.id, name: v.name }); }
-  if (i === 1) { const v = await alertForm("Adresse", "", [{ name: "url", ph: "http://…", value: a.url }]); if (v) saveApp({ op: "edit", id: a.id, url: v.url }); }
+  if (i === 1) { const v = await alertForm("Adresse", "", [{ name: "url", ph: "http://…", value: a.url || "" }]); if (v) saveApp({ op: "edit", id: a.id, url: v.url }); }
   if (i === 2) saveApp({ op: "edit", id: a.id, hidden: !a.hidden });
   if (i === 3) saveApp({ op: "delete", id: a.id });
 });
@@ -1695,6 +1716,9 @@ $("#maint").addEventListener("click", async e => {
 
 // ---------- quoi de neuf : la plus récente en premier ; l'id (date + lettre) doit croître à chaque ajout
 const CHANGES = [
+  { id: "2026-10-14e", title: "Apps", items: [
+    "L'onglet Apps liste toutes les apps de tes conteneurs et VM, même sans page web (base de données, MQTT…), conteneurs Docker compris.",
+    "Rangées par machine, avec leur logo. Une machine arrêtée garde ses apps, grisées."] },
   { id: "2026-10-14d", title: "Nouveau design", items: [
     "Nouveau logo et nouvelles couleurs, en clair comme en sombre.",
     "Sur ordinateur : barre latérale, tableau de bord sur deux colonnes, fiche machine à côté de la liste."] },
