@@ -682,6 +682,21 @@ def r_cron_save(d):
     return r_cron(d)
 
 
+# ---------------------------------------------------------------- accès à distance (Tailscale)
+def r_remote(_):
+    """État de Tailscale dans ce conteneur, pour afficher l'adresse HTTPS dans Réglages."""
+    info = {"ctid": read_local("CTID") or None, "repo": UPDATE_REPO}
+    try:
+        p = subprocess.run(["tailscale", "status", "--json"], capture_output=True, timeout=5)
+        st = json.loads(p.stdout or b"{}")
+    except FileNotFoundError:
+        return {**info, "installed": False}
+    except (subprocess.TimeoutExpired, ValueError):
+        return {**info, "installed": True, "state": "Unknown"}
+    name = (st.get("Self") or {}).get("DNSName", "").rstrip(".")
+    return {**info, "installed": True, "state": st.get("BackendState"), "url": f"https://{name}" if name else None}
+
+
 # ---------------------------------------------------------------- mise à jour
 _upd = {"at": 0, "data": None}
 
@@ -1083,6 +1098,7 @@ ROUTES = {
     ("GET", "/api/cron"): r_cron,
     ("POST", "/api/cron"): r_cron_save,
     ("GET", "/api/version"): r_version,
+    ("GET", "/api/remote"): r_remote,
     ("POST", "/api/update"): r_update,
     ("GET", "/api/apps"): r_apps,
     ("POST", "/api/apps/save"): r_apps_save,

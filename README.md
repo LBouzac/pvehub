@@ -67,6 +67,21 @@ bash <(curl -fsSL https://raw.githubusercontent.com/LBouzac/pvehub/main/pvehub-i
 La mise à jour demande si tu veux la section Commandes : « o » crée une clé SSH dans le conteneur et l'autorise
 en root sur l'hôte ; « n » la retire. Lancée depuis l'onglet Commandes, elle garde le réglage actuel sans rien demander.
 
+## Accès depuis l'extérieur (Tailscale)
+
+Pour ouvrir l'app hors de chez toi, en HTTPS, sans ouvrir de port sur ta box. Depuis le Shell de Proxmox :
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/LBouzac/pvehub/main/pvehub-install.sh) tailscale <ID-du-conteneur>
+```
+
+Le script donne au conteneur l'accès à `/dev/net/tun` (il redémarre une fois), installe Tailscale, affiche un lien
+pour le connecter à ton compte, puis active l'adresse `https://pvehub.<ton-réseau>.ts.net`. Sur le téléphone :
+app Tailscale connectée au même compte. L'adresse s'affiche aussi dans Réglages → Accès à distance.
+
+Pour couper l'accès : `pct exec <ID> -- tailscale logout`. Une migration vers un nouveau conteneur ne reprend pas
+Tailscale : relance la commande ci-dessus après.
+
 ## Passer d'un ancien conteneur Debian à Alpine
 
 Les installations d'avant octobre 2026 utilisaient Debian. Pour passer à Alpine (moins de RAM et de disque),

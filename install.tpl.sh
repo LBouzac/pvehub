@@ -4,6 +4,7 @@
 #   bash pvehub-install.sh update ID   → met à jour l'app dans le conteneur ID (garde la config)
 #   bash pvehub-install.sh migrate ID  → remplace le conteneur ID (ancien, Debian) par un conteneur Alpine,
 #                                        avec la même config et la même adresse réseau
+#   bash pvehub-install.sh tailscale ID → accès depuis l'extérieur en HTTPS via Tailscale
 set -euo pipefail
 
 [ "$(id -u)" = 0 ] || { echo "Lance ce script en root sur l'hôte Proxmox."; exit 1; }
@@ -129,6 +130,45 @@ start_and_check() {  # $1 = CTID — démarre le service et vérifie qu'il répo
 unpack
 
 case "${1:-}" in
+tailscale)
+  CTID=${2:?usage : bash pvehub-install.sh tailscale <CTID>}
+  # le conteneur redémarre et la connexion demande d'ouvrir un lien : impossible depuis l'onglet Commandes
+  (exec </dev/tty) 2>/dev/null || { echo "❌ Lance cette commande depuis le Shell de Proxmox, pas depuis l'onglet Commandes."; exit 1; }
+  pct config "$CTID" >/dev/null || { echo "❌ Conteneur $CTID introuvable."; exit 1; }
+  ctsh "$CTID" "command -v apk >/dev/null" || { echo "❌ Ce conteneur n'est pas sous Alpine : fais d'abord « migrate $CTID »."; exit 1; }
+
+  if ! pct config "$CTID" | grep -q '/dev/net/tun'; then
+    say "Accès au réseau virtuel (/dev/net/tun) pour le CT $CTID"
+    for i in $(seq 0 9); do pct config "$CTID" | grep -q "^dev$i:" || { pct set "$CTID" "--dev$i" /dev/net/tun; break; }; done
+    echo "Redémarrage du conteneur pour appliquer le réglage…"
+    pct reboot "$CTID"
+    for _ in $(seq 30); do ctsh "$CTID" "nslookup dl-cdn.alpinelinux.org >/dev/null 2>&1" 2>/dev/null && break; sleep 2; done
+  fi
+
+  say "Installation de Tailscale"
+  ctsh "$CTID" "apk add -q --no-cache tailscale && rc-update add tailscale default >/dev/null && rc-service tailscale start >/dev/null"
+
+  say "Connexion à ton compte Tailscale"
+  KEY=$(ask "Clé d'authentification Tailscale (vide = un lien à ouvrir)" "")
+  if [ -n "$KEY" ]; then
+    [[ "$KEY" =~ ^tskey-[A-Za-z0-9_-]+$ ]] || { echo "❌ Clé invalide (elle commence par tskey-)."; exit 1; }
+    ctsh "$CTID" "tailscale up --hostname=pvehub --auth-key=$KEY"
+  else
+    echo "Ouvre le lien qui va s'afficher (sur ton téléphone ou ton ordinateur) et connecte-toi."
+    ctsh "$CTID" "tailscale up --hostname=pvehub"
+  fi
+
+  say "Adresse HTTPS"
+  echo "Si un lien s'affiche, ouvre-le pour autoriser HTTPS sur ton réseau Tailscale (une seule fois)."
+  ctsh "$CTID" "tailscale serve --bg 8080"
+  NAME=$(ctsh "$CTID" "tailscale status --json" | python3 -c "import json,sys; print(json.load(sys.stdin)['Self']['DNSName'].rstrip('.'))")
+  say "C'est prêt"
+  echo "  Adresse à distance : https://$NAME"
+  echo
+  echo "  Sur ton téléphone : installe l'app Tailscale, connecte-toi avec le même compte,"
+  echo "  puis ouvre l'adresse et « Ajouter à l'écran d'accueil »."
+  exit 0 ;;
+
 update)
   CTID=${2:?usage : bash pvehub-install.sh update <CTID>}
   say "Mise à jour de PVE Hub dans le CT $CTID"

@@ -1100,6 +1100,29 @@ async function doUpdate() {
   } catch (e) { t.remove(); toast("❌ " + e.message.split("\n")[0], 8000); }
 }
 
+// ---------- accès à distance
+const tsCommand = () => `bash <(curl -fsSL https://raw.githubusercontent.com/${S.remote?.repo || "LBouzac/pvehub"}/main/pvehub-install.sh) tailscale ${S.remote?.ctid || "<ID>"}`;
+function remoteHtml() {
+  const r = S.remote;
+  if (!r) return `<div class="cell"><div class="body mute">Chargement…</div></div>`;
+  if (r.installed && r.state === "Running" && r.url)
+    return `<div class="cell"><div class="body">Adresse</div><div class="v ell" style="max-width:62%;font-size:15px">${esc(r.url.replace("https://", ""))}</div></div>
+      <button class="cell tap act" data-copy="${esc(r.url)}"><div class="body">Copier l'adresse</div></button>`;
+  const why = r.installed ? `Tailscale installé mais pas connecté (${esc(r.state || "?")})` : "Non configuré";
+  return `<div class="cell"><div class="body"><div class="t">${why}</div>
+      <div class="s" style="font-family:var(--mono);font-size:12px;word-break:break-all;margin-top:6px">${esc(tsCommand())}</div></div></div>
+    <button class="cell tap act" data-copy="${esc(tsCommand())}"><div class="body">Copier la commande</div></button>`;
+}
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); }
+  catch {  // http (sans HTTPS) : l'API presse-papiers n'existe pas, on passe par une zone de texte
+    const ta = document.createElement("textarea"); ta.value = t; ta.style.cssText = "position:fixed;opacity:0";
+    document.body.appendChild(ta); ta.select(); ta.setSelectionRange(0, t.length);
+    try { document.execCommand("copy"); } finally { ta.remove(); }
+  }
+  toast("📋 Copié");
+}
+
 // ---------- apparence
 const ACCENTS = [["blue", "Bleu"], ["indigo", "Indigo"], ["purple", "Violet"], ["pink", "Rose"], ["red", "Rouge"], ["orange", "Orange"], ["green", "Vert"], ["teal", "Turquoise"], ["mono", "Noir et blanc"]];
 const BGS = [["system", "Système"], ["tint", "Teinté"], ["contrast", "Contraste"]];
@@ -1117,6 +1140,10 @@ function openSettings() {
       <div class="ftr">${esc(ACCENTS.find(a => a[0] === acc)?.[1] || "")}</div>
       <div class="hdr">Fond</div>
       <div class="bgs">${BGS.map(([k, l]) => `<button class="bgopt ${bg === k ? "on" : ""}" data-bg="${k}"><span class="pv" data-pv="${k}"><b></b><b></b></span>${l}</button>`).join("")}</div>
+      <div class="hdr">Accès à distance</div>
+      <div class="group">${remoteHtml()}</div>
+      <div class="ftr">${S.remote?.state === "Running" ? "Depuis l'extérieur : l'app Tailscale doit être connectée sur ton téléphone, avec le même compte."
+        : "Pour ouvrir l'app hors de chez toi, en HTTPS, lance cette commande dans le Shell de Proxmox."}</div>
       <div class="hdr">Mise à jour</div>
       <div class="group">
         <div class="cell"><div class="body">Version</div><div class="v" style="font-family:var(--mono);font-size:15px">${esc(S.ver?.local || "inconnue")}</div></div>
@@ -1128,8 +1155,10 @@ function openSettings() {
       <div class="group"><button class="cell tap act danger" id="logout"><div class="body">Se déconnecter</div></button></div></div>`;
   };
   draw();
+  api("/api/remote").then(r => { S.remote = r; if (m.isConnected) draw(); }).catch(() => {});
   m.onclick = async e => {
     if (e.target === m || e.target.closest("[data-close]")) return m.remove();
+    const cp = e.target.closest("[data-copy]"); if (cp) return copyText(cp.dataset.copy);
     if (e.target.closest("#doUpd")) { m.remove(); return doUpdate(); }
     if (e.target.closest("#chkUpd")) { e.target.closest("#chkUpd").querySelector(".body").textContent = "Vérification…"; await checkVersion(true); return draw(); }
     if (e.target.closest("#logout")) { await api("/api/logout", { body: {} }).catch(() => {}); m.remove(); return showLogin(); }
