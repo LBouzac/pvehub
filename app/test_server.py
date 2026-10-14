@@ -229,6 +229,11 @@ assert [(a["name"], a["store"]) for a in apps] == [("2FAuth", 120)], apps   # au
 srv._scan["data"]["ports"] = {"lxc/120": {8000}}
 apps = srv.r_apps({})["apps"]
 assert [(a["name"], a["url"], a["store"]) for a in apps] == [("2FAuth", "http://192.0.2.9:8000", 120)], apps
+# masquée avant la mise à jour (id par port) puis ré-affichée : le réglage est déplacé, et « afficher » l'emporte
+cfg = srv.load_apps_cfg(); cfg["over"] = {"lxc/120:8000": {"hidden": True}}; srv.save_apps_cfg(cfg)
+assert srv.r_apps({})["apps"][0].get("hidden") is True
+srv.r_apps_save({"op": "edit", "id": apps[0]["id"], "hidden": False})
+assert not srv.r_apps({})["apps"][0].get("hidden") and "lxc/120:8000" not in srv.load_apps_cfg()["over"]
 srv.r_apps_save({"op": "edit", "id": apps[0]["id"], "icon": "Vaultwarden"})
 assert srv.r_apps({})["apps"][0]["icon"] == "vaultwarden"
 for bad in ("javascript:alert(1)", "http://x/a.png", "a b"):

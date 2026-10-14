@@ -2532,8 +2532,18 @@ def r_apps(q):
             apps += [{**a, "url": None, "guest": gid, "off": True} for a in items]
     for link in cfg["links"]:
         apps.append({**link, "custom": True})
-    for a in apps:  # réglages de l'utilisateur, y compris ceux faits avant (un id par port)
-        over = cfg["over"].get(a["id"]) or next((cfg["over"][o] for o in a.get("old", []) if o in cfg["over"]), {})
+    moved = False
+    for a in apps:  # réglages faits avant (un id par port) : déplacés une fois pour toutes sur l'id de l'app
+        for o in a.get("old", []):
+            if o in cfg["over"] and o != a["id"]:
+                cfg["over"].setdefault(a["id"], cfg["over"][o])
+                del cfg["over"][o]
+                moved = True
+    if moved:
+        with _apps_lock:
+            save_apps_cfg(cfg)
+    for a in apps:
+        over = cfg["over"].get(a["id"], {})
         a.update({k: v for k, v in over.items() if k in ("url", "hidden", "name", "icon") and v})
         if over.get("url"):
             a["cands"] = [over["url"]]
