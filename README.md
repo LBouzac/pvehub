@@ -293,7 +293,7 @@ Anciens conteneurs Debian : `journalctl -u pvehub -n 50` et `systemctl restart p
 | Le rapport du matin arrive à la mauvaise heure | Change l'heure une fois dans Réglages depuis le téléphone : il transmet son fuseau horaire. Mets aussi PVE Hub à jour (paquet `tzdata`) |
 | Le rapport est « factuel » au lieu d'être rédigé par Hermes | Hermes n'a pas répondu à temps : regarde le journal (« Rapport : Hermes indisponible… ») et la section 3 |
 | Plus de notifications après avoir supprimé l'icône | Normal : l'abonnement est lié à l'icône. Rajoute l'app à l'écran d'accueil et réactive |
-| Store : « Permission check failed … SDN.Use » | Mets PVE Hub à jour : la mise à jour donne le droit réseau (rôle PVESDNUser) à l'utilisateur `pvehub@pve` |
+| Store : « Permission check failed … SDN.Use » ou « … Datastore.AllocateTemplate » | Mets PVE Hub à jour : la mise à jour donne à `pvehub@pve` le droit réseau (rôle PVESDNUser) et le droit de télécharger des modèles (rôle dédié PVEHubTemplates, sur les stockages uniquement) |
 | Store : « Catalogue injoignable » | Le conteneur doit pouvoir joindre `codeload.github.com`. Réessaie avec Actualiser |
 | Store : l'installation d'un script communautaire échoue ou bloque | Le journal montre où. Relance-la depuis le Shell avec « Copier la commande » pour voir les questions éventuelles |
 | Le conteneur ne démarre pas à l'installation | `pct start <ID> --debug` et regarde les dernières lignes |
