@@ -251,4 +251,9 @@ except srv.ApiError as e:
     assert "désactivé" in e.msg
 srv.r_app_settings({"hermes": True}); srv.HERMES_URL = ""
 assert not srv.hermes_on()                                        # pas configuré : jamais actif
+# même ID réutilisé par Proxmox pour une autre machine : jamais désinstallée par erreur
+assert srv.same_guest({"guest": "2fauth"}, {"name": "2fauth"}) and not srv.same_guest({"guest": "2fauth"}, {"name": "nas"})
+assert srv.same_guest({}, {"name": "x"}) and not srv.same_guest({"guest": "x"}, None)
+# heure locale (le conteneur est en UTC)
+assert srv.local_time(0, {"tz": "Europe/Paris"}).hour == 1 or not srv.local_time(0, {"tz": "Europe/Paris"}).tzinfo
 print("ok")

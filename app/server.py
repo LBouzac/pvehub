@@ -22,7 +22,6 @@ from concurrent.futures import ThreadPoolExecutor
 import urllib.error
 import urllib.parse
 import urllib.request
-from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -402,8 +401,9 @@ class Handler(BaseHTTPRequestHandler):
             raise ApiError(400, "JSON invalide")
 
     def authed(self):
-        c = cookies.SimpleCookie(self.headers.get("Cookie", ""))
-        self.sid = session_id(c["pvehub"].value) if "pvehub" in c else None
+        # pas de SimpleCookie : un cookie mal formé posé par une autre app du même hôte lui fait ignorer la suite
+        jar = dict(p.strip().split("=", 1) for p in self.headers.get("Cookie", "").split(";") if "=" in p)
+        self.sid = session_id(jar["pvehub"]) if "pvehub" in jar else None
         return bool(self.sid) or not auth_enabled()
 
     def qs(self):
@@ -438,6 +438,9 @@ class Handler(BaseHTTPRequestHandler):
                 if method != "GET":
                     raise ApiError(405, "Méthode non autorisée")
                 return self.serve_static(path)
+            # un formulaire d'un autre site ne peut pas envoyer du JSON sans autorisation du navigateur (CSRF)
+            if method == "POST" and not (self.headers.get("Content-Type") or "").startswith("application/json"):
+                raise ApiError(415, "Requête JSON attendue")
             if path == "/api/login" and method == "POST":
                 return self.login()
             if path == "/api/logout" and method == "POST":
@@ -525,7 +528,7 @@ class Handler(BaseHTTPRequestHandler):
             summary = f"(état indisponible : {e.msg})"
         if msgs[-1]["role"] != "user":
             raise ApiError(400, "Le dernier message doit venir de toi")
-        system = SYSTEM_PROMPT.format(now=time.strftime("%d/%m/%Y %H:%M"), summary=summary)
+        system = SYSTEM_PROMPT.format(now=local_now().strftime("%d/%m/%Y %H:%M"), summary=summary)
         # API « runs » : seule à exposer les demandes d'autorisation de Hermes (approval.request)
         run = hermes("POST", "/v1/runs", {"input": msgs[-1]["content"], "instructions": system,
                                            "conversation_history": msgs[:-1]})
@@ -693,7 +696,7 @@ def r_maint_updates(q):
             threading.Thread(target=scan_updates, daemon=True).start()
     return {"scanning": _updates["running"], "checked_at": int(_updates["at"]) or None, "error": _updates["error"],
             "host": _updates.get("host"), "cts": [{"vmid": v, **d} for v, d in sorted(_updates["cts"].items())],
-            "jobs": {k: {kk: vv for kk, vv in j.items() if kk != "output"} for k, j in _jobs.items()}}
+            "jobs": {k: {kk: vv for kk, vv in j.items() if kk != "output"} for k, j in list(_jobs.items())}}
 
 
 def run_upgrade(job_id, node, vmid, snapshot):
@@ -884,7 +887,7 @@ def read_json(path, default):
 
 def write_json(path, obj):
     os.makedirs(DATA_DIR, exist_ok=True)
-    tmp = path + ".tmp"
+    tmp = f"{path}.{threading.get_ident()}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(obj, f, ensure_ascii=False, indent=1)
     os.replace(tmp, path)
@@ -1034,14 +1037,19 @@ ALERT_DEFAULTS = {"stopped": True, "disk": True, "disk_threshold": 90, "backup":
 REPORTS_FILE = os.path.join(DATA_DIR, "reports.json")  # derniers rapports du matin
 
 
-def local_now(s=None):
-    """Heure locale de l'utilisateur (fuseau envoyé par son téléphone ; le conteneur est en UTC)."""
+def local_time(ts=None, s=None):
+    """Date locale de l'utilisateur (fuseau envoyé par son téléphone ; le conteneur est en UTC)."""
     import datetime
+    ts = time.time() if ts is None else ts
     try:
         from zoneinfo import ZoneInfo
-        return datetime.datetime.now(ZoneInfo((s or alert_settings())["tz"]))
+        return datetime.datetime.fromtimestamp(ts, ZoneInfo((s or alert_settings())["tz"]))
     except Exception:  # noqa: BLE001 — fuseau inconnu ou tzdata absent : heure du conteneur
-        return datetime.datetime.now()
+        return datetime.datetime.fromtimestamp(ts)
+
+
+def local_now(s=None):
+    return local_time(None, s)
 
 
 def alert_settings():
@@ -1158,7 +1166,7 @@ def check_failed_backups(tasks, since):
     done = [t for t in tasks if t.get("type") == "vzdump" and t.get("endtime") and t["endtime"] > since]
     bad = [t for t in done if t.get("status") != "OK"]
     alerts = [("Sauvegarde en échec", f"Sauvegarde{' de la machine ' + str(t['id']) if t.get('id') else ''} du "
-               f"{time.strftime('%d/%m à %H:%M', time.localtime(t['starttime']))} : {t.get('status')}", "/#maint") for t in bad]
+               f"{local_time(t['starttime']).strftime('%d/%m à %H:%M')} : {t.get('status')}", "/#maint") for t in bad]
     return alerts, max([since] + [t["endtime"] for t in done])
 
 
@@ -1425,6 +1433,11 @@ def all_guests():
     return [g for g in pve("GET", "/cluster/resources", {"type": "vm"}) or [] if not g.get("template")]
 
 
+def same_guest(entry, g):
+    """L'app notée est-elle toujours cette machine ? Proxmox réutilise les ID libérés : le nom doit aussi correspondre."""
+    return bool(g) and (not entry.get("guest") or entry["guest"] == g.get("name", ""))
+
+
 def remember_install(job, before):
     """Retrouve le conteneur créé (ID lu dans le journal, sinon le seul nouveau) et le note pour l'onglet Apps."""
     new = [g["vmid"] for g in all_guests() if g["vmid"] not in before]
@@ -1432,9 +1445,11 @@ def remember_install(job, before):
     if not vmid:
         return
     job["vmid"] = vmid
+    gname_ = next((g.get("name", "") for g in all_guests() if g["vmid"] == vmid), "")
     with _installed_lock:
         inst = read_json(INSTALLED_FILE, {})
-        inst[str(vmid)] = {"name": job["name"], "source": job["source"], "url": job.get("url"), "at": int(time.time())}
+        inst[str(vmid)] = {"name": job["name"], "source": job["source"], "url": job.get("url"), "at": int(time.time()),
+                           "guest": gname_}
         write_json(INSTALLED_FILE, inst)
 
 
@@ -1442,6 +1457,8 @@ def uninstall(job, vmid, backup):
     g = next((g for g in all_guests() if g["vmid"] == vmid), None)
     if not g:
         raise ApiError(404, f"La machine {vmid} n'existe plus")
+    if not same_guest(read_json(INSTALLED_FILE, {}).get(str(vmid), {}), g):
+        raise ApiError(409, f"La machine {vmid} n'est plus celle installée par le Store : rien n'a été supprimé")
     node, typ = g["node"], g["type"]
     if backup:
         storage = (backup_storages(node) or [None])[0]
@@ -1514,10 +1531,13 @@ def r_store_install(d):
 
 
 def r_store_uninstall(d):
-    vmid = int(d.get("vmid") or 0)
-    item = read_json(INSTALLED_FILE, {}).get(str(vmid))
+    vmid = str(d.get("vmid", ""))
+    item = read_json(INSTALLED_FILE, {}).get(vmid) if vmid.isdigit() else None
     if not item:  # garde-fou : seules les apps installées par le Store se désinstallent d'ici
         raise ApiError(403, "Cette machine n'a pas été installée par le Store")
+    vmid = int(vmid)
+    if any(j.get("vmid") == vmid and j["status"] == "running" for j in list(_store_jobs.values())):
+        raise ApiError(409, "Une désinstallation est déjà en cours")
     job_id = secrets.token_hex(6)
     _store_jobs[job_id] = job = {"id": job_id, "kind": "uninstall", "source": item["source"], "name": item["name"],
                                  "status": "running", "at": int(time.time()), "log": [], "vmid": vmid}
@@ -1849,7 +1869,8 @@ def r_apps(q):
     guests = [g for g in every if g.get("status") == "running"]
     with _installed_lock:
         inst = read_json(INSTALLED_FILE, {})
-        alive = {k: v for k, v in inst.items() if int(k) in {g["vmid"] for g in every}}
+        by_id = {g["vmid"]: g for g in every}
+        alive = {k: v for k, v in inst.items() if same_guest(v, by_id.get(int(k)))}
         if alive != inst:  # supprimé depuis Proxmox : on l'oublie
             write_json(INSTALLED_FILE, alive)
     if q.get("rescan") or time.time() - _scan["at"] > 60:

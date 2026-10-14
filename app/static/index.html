@@ -610,14 +610,12 @@ function renderGuest() {
     </div>
     <div class="hdr" style="margin-top:22px"></div><div class="group">
       ${S.ov.exec ? `<button class="cell icon tap" id="gExec">${icoBox(I.term, "gray")}<div class="body t">Lancer une commande</div>${I.chev}</button>` : ""}
-      ${S.ov.hermes ? `<button class="cell icon tap" id="gAsk">${icoBox(I.chat, "blue")}<div class="body t">Demander à Hermes</div>${I.chev}</button>` : ""}
     </div>
     <div class="hdr">Snapshots</div><div class="group" id="snaps">${snapsHtml()}</div>
     <div class="hdr">Sauvegardes</div><div class="group" id="bks">${bksHtml()}</div>
     <div style="height:calc(40px + env(safe-area-inset-bottom))"></div>`;
   $("#sheet").scrollTop = sc;
   drawGuestCharts();
-  $("#gAsk") && ($("#gAsk").onclick = () => { history.back(); setView("chat"); $("#prompt").value = `Analyse ${g.type === "qemu" ? "la VM" : "le conteneur"} ${g.vmid} (${g.name}). Tout va bien ?`; $("#prompt").focus(); });
   $("#gExec") && ($("#gExec").onclick = () => { history.back(); S.execTarget = JSON.stringify({ type: g.type, node: g.node, vmid: g.vmid }); setView("exec"); $("#cmd")?.focus(); });
 }
 $("#sheet").addEventListener("scroll", () => $("#gnav")?.classList.toggle("scrolled", $("#sheet").scrollTop > 30), { passive: true });
@@ -1626,7 +1624,7 @@ function approvalsHtml(m) {
   return (m.approvals || []).map((ap, i) => `<div class="inline"><div class="it">${I.shield.replace("<svg", '<svg width="16" height="16" style="color:var(--orange)"')}Hermes demande l'autorisation</div>
     ${ap.description ? `<div class="is">${esc(ap.description)}</div>` : ""}${ap.command ? `<pre>${esc(ap.command)}</pre>` : ""}
     ${ap.answer ? `<div class="done ${ap.answer === "deny" ? "no" : ""}">${ap.answer === "deny" ? "✕ Refusé" : "✓ " + esc(CHOICE[ap.answer] || ap.answer)}</div>`
-      : m.typing ? `<div class="ibtns">${(ap.choices || ["once", "deny"]).map(c => `<button class="ibtn ${c === "once" ? "pri" : c === "deny" ? "no" : ""}" data-ap="${i}" data-choice="${c}">${CHOICE[c] || c}</button>`).join("")}</div>`
+      : m.typing ? `<div class="ibtns">${(ap.choices || ["once", "deny"]).map(c => `<button class="ibtn ${c === "once" ? "pri" : c === "deny" ? "no" : ""}" data-ap="${i}" data-choice="${esc(c)}">${esc(CHOICE[c] || c)}</button>`).join("")}</div>`
       : `<div class="done no">Demande expirée</div>`}</div>`).join("");
 }
 function msgHtml(m, idx) {
