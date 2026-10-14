@@ -38,8 +38,8 @@ assert srv.parse_listen("tcp        0      0 0.0.0.0:8080            0.0.0.0:*  
 D = srv.parse_docker("lscr.io/linuxserver/sonarr:latest|sonarr|0.0.0.0:8989->8989/tcp, :::8989->8989/tcp\nkoenkk/zigbee2mqtt|z2m|")
 assert D == [("lscr.io/linuxserver/sonarr:latest", "sonarr", {8989}), ("koenkk/zigbee2mqtt", "z2m", set())], D
 A = {a["name"]: (a["icon"], sorted(a["ports"])) for a in srv.guest_apps("media", L, D)}
-assert A == {"Sonarr": ("sonarr", [8989]), "Zigbee2MQTT": ("zigbee2mqtt", []), "Jellyfin": ("jellyfin", [8096]),
-             "Grafana": ("grafana", [3000]), "Mosquitto": ("mosquitto", [1883]), "media": ("media", [7777])}, A
+assert A == {"Sonarr": ("sonarr", [8989]), "Zigbee2mqtt": ("zigbee2mqtt", []), "Jellyfin": ("jellyfin", [8096]),
+             "Mosquitto": ("mosquitto", [1883]), "media": ("media", [3000, 7777])}, A
 
 for bad in ("javascript:alert(1)", "ftp://x", "http://", "x" * 400):
     try:

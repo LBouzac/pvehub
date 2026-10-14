@@ -2297,62 +2297,13 @@ def r_update(_):
 # Ports qui ne sont jamais des interfaces web (SSH, DNS, bases de données, MQTT…)
 NOT_WEB = {21, 22, 23, 25, 53, 110, 111, 123, 135, 137, 138, 139, 143, 389, 445, 465, 587, 631, 636, 993, 995,
            1883, 2049, 3306, 5353, 5432, 6379, 8883, 11211, 27017}
-PORT_NAMES = {8123: "Home Assistant", 8096: "Jellyfin", 32400: "Plex", 9000: "Portainer", 9443: "Portainer",
-              8642: "Hermes", 9091: "Transmission", 8989: "Sonarr", 7878: "Radarr", 9696: "Prowlarr",
-              8384: "Syncthing", 5678: "n8n", 3001: "Uptime Kuma", 19999: "Netdata", 8000: "", 8080: ""}
 HTTPS_PORTS = {443, 8443, 9443}
-# Programme (nom du processus ou de l'image Docker, en minuscules) → (nom affiché, logo selfh.st/icons)
-KNOWN_APPS = {
-    "jellyfin": ("Jellyfin", "jellyfin"), "plex media serv": ("Plex", "plex"), "plexmediaserver": ("Plex", "plex"), "plex": ("Plex", "plex"),
-    "emby": ("Emby", "emby"), "embyserver": ("Emby", "emby"),
-    "hass": ("Home Assistant", "home-assistant"), "home-assistant": ("Home Assistant", "home-assistant"),
-    "homeassistant": ("Home Assistant", "home-assistant"),
-    "pihole-ftl": ("Pi-hole", "pi-hole"), "pihole": ("Pi-hole", "pi-hole"), "adguardhome": ("AdGuard Home", "adguard-home"),
-    "mosquitto": ("Mosquitto", "mosquitto"), "eclipse-mosquitto": ("Mosquitto", "mosquitto"), "smbd": ("Samba", "samba"),
-    "nginx": ("Nginx", "nginx"), "caddy": ("Caddy", "caddy"), "traefik": ("Traefik", "traefik"), "haproxy": ("HAProxy", "haproxy"),
-    "apache2": ("Apache", "apache"), "httpd": ("Apache", "apache"), "lighttpd": ("lighttpd", "lighttpd"),
-    "nginx-proxy-manager": ("Nginx Proxy Manager", "nginx-proxy-manager"),
-    "vaultwarden": ("Vaultwarden", "vaultwarden"), "gitea": ("Gitea", "gitea"), "forgejo": ("Forgejo", "forgejo"),
-    "grafana": ("Grafana", "grafana"), "grafana-server": ("Grafana", "grafana"), "prometheus": ("Prometheus", "prometheus"),
-    "influxd": ("InfluxDB", "influxdb"), "influxdb": ("InfluxDB", "influxdb"), "loki": ("Loki", "loki"),
-    "postgres": ("PostgreSQL", "postgresql"), "postgresql": ("PostgreSQL", "postgresql"), "mysqld": ("MySQL", "mysql"),
-    "mariadbd": ("MariaDB", "mariadb"), "mariadb": ("MariaDB", "mariadb"), "mysql": ("MySQL", "mysql"),
-    "redis-server": ("Redis", "redis"), "redis": ("Redis", "redis"), "mongod": ("MongoDB", "mongodb"), "mongo": ("MongoDB", "mongodb"),
-    "syncthing": ("Syncthing", "syncthing"), "transmission-da": ("Transmission", "transmission"),
-    "transmission": ("Transmission", "transmission"), "qbittorrent-nox": ("qBittorrent", "qbittorrent"),
-    "qbittorrent": ("qBittorrent", "qbittorrent"), "deluged": ("Deluge", "deluge"), "sabnzbd": ("SABnzbd", "sabnzbd"),
-    "sonarr": ("Sonarr", "sonarr"), "radarr": ("Radarr", "radarr"), "prowlarr": ("Prowlarr", "prowlarr"), "lidarr": ("Lidarr", "lidarr"),
-    "readarr": ("Readarr", "readarr"), "bazarr": ("Bazarr", "bazarr"), "jackett": ("Jackett", "jackett"),
-    "overseerr": ("Overseerr", "overseerr"), "jellyseerr": ("Jellyseerr", "jellyseerr"), "tautulli": ("Tautulli", "tautulli"),
-    "tailscaled": ("Tailscale", "tailscale"), "cloudflared": ("Cloudflared", "cloudflare"), "frigate": ("Frigate", "frigate"),
-    "zigbee2mqtt": ("Zigbee2MQTT", "zigbee2mqtt"), "node-red": ("Node-RED", "node-red"), "esphome": ("ESPHome", "esphome"),
-    "homebridge": ("Homebridge", "homebridge"), "portainer": ("Portainer", "portainer"), "uptime-kuma": ("Uptime Kuma", "uptime-kuma"),
-    "n8n": ("n8n", "n8n"), "immich": ("Immich", "immich"), "immich-server": ("Immich", "immich"), "ollama": ("Ollama", "ollama"),
-    "open-webui": ("Open WebUI", "open-webui"), "paperless": ("Paperless-ngx", "paperless-ngx"), "paperless-ngx": ("Paperless-ngx", "paperless-ngx"),
-    "nextcloud": ("Nextcloud", "nextcloud"), "netdata": ("Netdata", "netdata"), "cockpit-ws": ("Cockpit", "cockpit"),
-    "miniserv.pl": ("Webmin", "webmin"), "code-server": ("code-server", "visual-studio-code"), "wg-easy": ("WireGuard", "wireguard"),
-    "upsd": ("NUT", "nut"), "minio": ("MinIO", "minio"), "homepage": ("Homepage", "homepage"), "heimdall": ("Heimdall", "heimdall"),
-    "dashy": ("Dashy", "dashy"), "authelia": ("Authelia", "authelia"), "authentik": ("authentik", "authentik"),
-    "wireguard": ("WireGuard", "wireguard"), "unifi": ("UniFi", "ubiquiti-unifi"), "mealie": ("Mealie", "mealie"),
-    "freshrss": ("FreshRSS", "freshrss"), "audiobookshelf": ("Audiobookshelf", "audiobookshelf"), "navidrome": ("Navidrome", "navidrome"),
-    "photoprism": ("PhotoPrism", "photoprism"), "kavita": ("Kavita", "kavita"), "calibre-web": ("Calibre-Web", "calibre-web"),
-    "ntfy": ("ntfy", "ntfy"), "gotify": ("Gotify", "gotify"), "stirling-pdf": ("Stirling-PDF", "stirling-pdf"),
-    "it-tools": ("IT-Tools", "it-tools"), "2fauth": ("2FAuth", "2fauth"), "docker": ("Docker", "docker"),
-    "meyectl": ("motionEye", "motioneye"), "motioneye": ("motionEye", "motioneye"), "hermes": ("Hermes", "hermes-agent"),
-    "hermes-agent": ("Hermes", "hermes-agent"), "pvehub": ("PVE Hub", "pvehub"),
-}
-# Ports bien connus quand le processus ne dit rien (node, python, java…)
-PORT_APPS = {8123: "hass", 8096: "jellyfin", 32400: "plex", 9443: "portainer", 9091: "transmission", 8989: "sonarr", 7878: "radarr",
-             9696: "prowlarr", 8686: "lidarr", 6767: "bazarr", 8384: "syncthing", 5678: "n8n", 3001: "uptime-kuma", 19999: "netdata",
-             1883: "mosquitto", 5432: "postgres", 3306: "mysqld", 6379: "redis-server", 27017: "mongod", 445: "smbd",
-             1880: "node-red", 6052: "esphome", 8581: "homebridge", 2283: "immich", 11434: "ollama", 9090: "prometheus",
-             3000: "grafana", 8086: "influxd", 25565: ("Minecraft", "minecraft"), 8642: ("Hermes", "hermes-agent")}
 # Services du système : jamais affichés comme des apps
 SYSTEM_PROCS = {"sshd", "sshd-session", "dropbear", "systemd", "systemd-resolve", "systemd-resolved", "systemd-network", "systemd-networkd",
                 "master", "exim4", "exim", "sendmail", "postfix", "rpcbind", "rpc.statd", "rpc.mountd", "chronyd", "ntpd", "dhclient",
                 "cupsd", "avahi-daemon", "qemu-ga", "containerd", "dockerd", "docker-proxy", "nmbd", "xinetd", "inetd", "snmpd",
                 "init", "rpc.idmapd", "kubelet", "nfsd", "lxcfs", "pvedaemon", "pveproxy", "spiceproxy", "pve-firewall"}
-# Exécutables génériques : le nom vient du port ou de la machine
+# Exécutables génériques : le nom vient de la machine
 GENERIC_PROCS = {"node", "nodejs", "python", "python3", "java", "php", "php-fpm", "php-fpm8", "ruby", "dotnet", "mono", "bun",
                  "deno", "gunicorn", "uvicorn", "beam.smp", "perl", "npm", "go", "main", "app", "server", ""}
 _scan = {"at": 0, "data": {}}
@@ -2416,18 +2367,19 @@ def app_key(word):
     return word.lower().rsplit("/", 1)[-1].split(":")[0].split("@")[0].strip()
 
 
-def known_app(key):
-    v = KNOWN_APPS.get(key)
-    return v if v else None
+def slug(word):
+    return re.sub(r"[^a-z0-9]+", "-", word.lower()).strip("-") or None
 
 
 def guest_apps(guest_name, listen, docker):
-    """Apps d'une machine : [{"name", "icon", "ports"}] depuis ses ports en écoute et ses conteneurs Docker."""
+    """Apps d'une machine : [{"name", "icon", "ports"}] depuis ses ports en écoute et ses conteneurs Docker.
+    Le nom vient du programme (ou de l'image Docker) ; pour un exécutable générique (python3, node…), du nom de la machine.
+    Le logo porte le même nom ; s'il n'existe pas, l'app essaie celui de la machine puis affiche l'initiale."""
     apps, by_port = {}, {}
     for image, cname, ports in docker:
-        key = app_key(image)
-        name, icon = known_app(key) or known_app(app_key(cname)) or (key.replace("-", " ").title() if key else cname, key or None)
-        a = apps.setdefault(name, {"name": name, "icon": icon, "ports": set()})
+        key = app_key(image) or app_key(cname)
+        name = key[:1].upper() + key[1:]
+        a = apps.setdefault(name, {"name": name, "icon": slug(key), "ports": set()})
         for p in ports:
             by_port[p] = name
             a["ports"].add(p)
@@ -2437,17 +2389,13 @@ def guest_apps(guest_name, listen, docker):
         key = app_key(proc)
         if key in SYSTEM_PROCS or (port == 53 and key in ("dnsmasq", "named", "unbound", "systemd-resolve")):
             continue
-        hit = known_app(key)
-        if not hit and (key in GENERIC_PROCS or not key):
-            pa = PORT_APPS.get(port)
-            hit = pa if isinstance(pa, tuple) else known_app(pa) if pa else None
-            if not hit and port not in NOT_WEB:
-                hit = (guest_name, app_key(guest_name).replace(" ", "-") or None)  # ex. conteneur « 2fauth » d'un script communautaire
-        if not hit and key and key not in GENERIC_PROCS:
-            hit = (proc.strip(), re.sub(r"[^a-z0-9]+", "-", key).strip("-") or None)
-        if not hit:
-            continue
-        apps.setdefault(hit[0], {"name": hit[0], "icon": hit[1], "ports": set()})["ports"].add(port)
+        if key in GENERIC_PROCS:
+            if port in NOT_WEB:
+                continue  # python3 sur un port de base de données… : on ne sait pas ce que c'est
+            name = guest_name  # ex. conteneur « 2fauth » d'un script communautaire
+        else:
+            name = proc.strip()[:1].upper() + proc.strip()[1:]
+        apps.setdefault(name, {"name": name, "icon": slug(name), "ports": set()})["ports"].add(port)
     return list(apps.values())
 
 
