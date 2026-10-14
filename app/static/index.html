@@ -331,6 +331,7 @@ canvas{width:100%;height:120px;display:block}
 <div class="push" id="maint"></div>
 <div class="push" id="store"></div>
 <div class="push" id="journal"></div>
+<div class="push" id="schedv"></div>
 <div class="push" id="chats"></div>
 <div class="push" id="settings" style="z-index:36"></div>
 <div class="push" id="sheet" style="z-index:35"></div>
@@ -544,7 +545,8 @@ function renderDash() {
     </div>`;
   h += `<div class="group" style="margin-top:14px"><button class="cell icon tap" id="maintBtn">${icoBox(I.wrench.replace(/width="12" height="12"/, ""), "orange")}
     <div class="body"><div class="t">Maintenance</div><div class="s">${esc(maintSummary())}</div></div>${maintAlert() ? '<span class="dot" style="background:var(--orange)"></span>' : ""}${I.chev}</button>
-    <button class="cell icon tap" id="journalBtn">${icoBox(I.bell, "red")}<div class="body"><div class="t">Journal</div><div class="s">Alertes, connexions et actions</div></div>${I.chev}</button></div>`;
+    <button class="cell icon tap" id="journalBtn">${icoBox(I.bell, "red")}<div class="body"><div class="t">Journal</div><div class="s">Alertes, connexions et actions</div></div>${I.chev}</button>
+    <button class="cell icon tap" id="schedBtn">${icoBox(I.power, "indigo")}<div class="body"><div class="t">Horaires</div><div class="s">${S.sched?.length ? `${S.sched.filter(x => x.enabled).length} actif${S.sched.filter(x => x.enabled).length > 1 ? "s" : ""} sur ${S.sched.length}` : "Allumer ou éteindre des machines à heure fixe"}</div></div>${I.chev}</button></div>`;
   for (const n of nodes) {
     const c = (n.cpu || 0) * 100;
     h += `<div class="hdr"><span class="grow">Nœud ${esc(n.node)}</span></div><div class="group">
@@ -560,6 +562,7 @@ function renderDash() {
   $("#v-dash").innerHTML = h;
   $("#maintBtn").onclick = openMaint;
   $("#journalBtn").onclick = () => openJournal();
+  $("#schedBtn").onclick = openSchedView;
   $("#updBanner") && ($("#updBanner").onclick = () => S.ver.can_update ? doUpdate() : openSettings());
   loadNodeCharts();
 }
@@ -602,7 +605,7 @@ function openGuest(id) {
   renderGuest(); loadGuestExtras();
 }
 function closeGuest() { S.guest = null; $("#sheet").classList.remove("open"); }
-addEventListener("popstate", () => { if (S.setOpen) closeSettings(); else if (S.guest) closeGuest(); else if (S.maintOpen) closeMaint(); else if (S.storeOpen) closeStore(); else if (S.jOpen) closeJournal(); else if (S.cOpen) closeChats(); });
+addEventListener("popstate", () => { if (S.setOpen) closeSettings(); else if (S.guest) closeGuest(); else if (S.maintOpen) closeMaint(); else if (S.storeOpen) closeStore(); else if (S.jOpen) closeJournal(); else if (S.schOpen) closeSchedView(); else if (S.cOpen) closeChats(); });
 
 function renderGuest() {
   const g = findGuest(S.guest); if (!g) return;
@@ -679,13 +682,20 @@ async function editResources() {
 // ---------- horaires d'allumage / d'extinction (exécutés par PVE Hub, à l'heure du téléphone)
 const SCHED_DAYS = { all: "tous les jours", week: "du lundi au vendredi", weekend: "le week-end" };
 const SCHED_ACT = { start: "Allumer", shutdown: "Éteindre" };
-const mySched = () => { const g = findGuest(S.guest); return (S.sched || []).filter(x => g && x.vmid == g.vmid && x.type === g.type); };
+const hasG = (x, g) => x.targets.some(t => t.vmid == g.vmid && t.type === g.type);
+const mySched = () => { const g = findGuest(S.guest); return (S.sched || []).filter(x => g && hasG(x, g)); };
+const tName = t => { const g = (S.ov?.guests || []).find(x => x.vmid == t.vmid && x.type === t.type); return g?.name || `${kind(t.type)} ${t.vmid}`; };
+const tz = () => Intl.DateTimeFormat().resolvedOptions().timeZone;
+async function saveSched(body) {
+  try { S.sched = (await api("/api/schedules", { body })).items; return true; } catch (e) { toast("❌ " + e.message, 5000); return false; }
+}
 function schedSummary() {
   const l = mySched();
   if (!S.sched) return "Chargement…";
   if (!l.length) return "Allumer ou éteindre à heure fixe";
   return l.map(x => `${x.enabled ? "" : "⏸ "}${SCHED_ACT[x.action]} à ${x.time}`).join(" · ");
 }
+// fiche d'une machine : ses horaires (seuls ou partagés avec d'autres machines)
 function openSchedules() {
   const g = findGuest(S.guest); if (!g) return;
   const m = document.createElement("div"); m.className = "modal";
@@ -693,32 +703,95 @@ function openSchedules() {
     const l = mySched();
     m.innerHTML = `<div class="card-sheet"><div class="grab"></div><div class="shead"><span style="width:60px"></span><h2>Horaires</h2><button class="navbtn" style="font-weight:600;width:60px;justify-content:flex-end" data-close>OK</button></div>
       <div class="hdr">${esc(g.name || g.vmid)}</div><div class="group">
-      ${l.map(x => `<label class="cell"><div class="body"><div class="t">${SCHED_ACT[x.action]} à ${esc(x.time)}</div><div class="s">${SCHED_DAYS[x.days]}</div></div>
-        <button class="navbtn" data-sdel="${esc(x.id)}" aria-label="Supprimer" style="color:var(--red)">${I.trash}</button>
+      ${l.map(x => `<label class="cell"><div class="body"><div class="t">${SCHED_ACT[x.action]} à ${esc(x.time)}</div><div class="s">${SCHED_DAYS[x.days]}${x.targets.length > 1 ? ` · avec ${x.targets.length - 1} autre${x.targets.length > 2 ? "s" : ""} machine${x.targets.length > 2 ? "s" : ""}` : ""}</div></div>
+        <button class="navbtn" data-sdel="${esc(x.id)}" aria-label="Retirer cette machine de l'horaire" style="color:var(--red)">${I.trash}</button>
         <span class="sw"><input type="checkbox" data-stog="${esc(x.id)}" ${x.enabled ? "checked" : ""} aria-label="Actif"><span></span></span></label>`).join("")}
-      <button class="cell icon tap act" data-sadd>${icoBox(I.plus, "accent")}<div class="body">Ajouter un horaire</div></button></div>
-      <div class="ftr">À ton heure, même app fermée : c'est le serveur PVE Hub qui s'en charge. « Éteindre » demande un arrêt propre, comme le bouton Éteindre. Rien n'est fait si la machine est déjà dans l'état voulu ; chaque action est notée dans le Journal.</div></div>`;
+      <button class="cell icon tap act" data-sadd>${icoBox(I.plus, "accent")}<div class="body">Ajouter un horaire</div></button>
+      <button class="cell tap" data-sall><div class="body">Tous les horaires</div>${I.chev}</button></div>
+      <div class="ftr">À ton heure, même app fermée : c'est le serveur PVE Hub qui s'en charge. La corbeille retire cette machine de l'horaire ; un horaire partagé se modifie dans « Tous les horaires ».</div></div>`;
   };
-  const save = async body => { try { S.sched = (await api("/api/schedules", { body })).items; } catch (e) { toast("❌ " + e.message); } draw(); if ($("#gopts")) $("#gopts").innerHTML = optsHtml(); };
+  const after = () => { draw(); if ($("#gopts")) $("#gopts").innerHTML = optsHtml(); };
   draw();
-  m.addEventListener("change", e => { const id = e.target.dataset.stog; if (id) save({ op: "toggle", id }); });
+  m.addEventListener("change", async e => { const id = e.target.dataset.stog; if (id) { await saveSched({ op: "toggle", id }); after(); } });
   m.addEventListener("click", async e => {
     if (e.target === m || e.target.closest("[data-close]")) return m.remove();
     const del = e.target.closest("[data-sdel]");
-    if (del) { e.preventDefault(); return save({ op: "delete", id: del.dataset.sdel }); }
-    if (e.target.closest("[data-sadd]")) {
-      const v = await alertForm("Nouvel horaire", esc(g.name || g.vmid), [
-        { name: "action", ph: "Action", options: Object.values(SCHED_ACT) },
-        { name: "time", label: "Heure", type: "time", value: "23:00", step: 60 },
-        { name: "days", ph: "Jours", options: Object.values(SCHED_DAYS) }]);
-      if (!v || !v.time) return;
-      const key = (o, val) => Object.keys(o).find(k => o[k] === val);
-      save({ op: "add", node: g.node, type: g.type, vmid: g.vmid, action: key(SCHED_ACT, v.action), time: v.time, days: key(SCHED_DAYS, v.days),
-        tz: Intl.DateTimeFormat().resolvedOptions().timeZone });
-    }
+    if (del) { e.preventDefault(); await saveSched({ op: "remove_target", id: del.dataset.sdel, type: g.type, vmid: g.vmid }); return after(); }
+    if (e.target.closest("[data-sall]")) { m.remove(); closeGuest(); return openSchedView(); }
+    if (e.target.closest("[data-sadd]")) { if (await editSchedule(null, [{ node: g.node, type: g.type, vmid: g.vmid }])) after(); }
   });
   document.body.appendChild(m);
 }
+// éditeur : action, heure, jours et machines (plusieurs à la fois). Résout true si enregistré.
+function editSchedule(it, preset) {
+  return new Promise(res => {
+    const sel = new Set((it?.targets || preset || []).map(t => `${t.type}/${t.vmid}`));
+    let act = it?.action || "shutdown";
+    const guests = (S.ov?.guests || []).filter(g => !g.template).sort((a, b) => a.vmid - b.vmid);
+    const m = document.createElement("div"); m.className = "modal";
+    const draw = () => {
+      m.innerHTML = `<div class="card-sheet"><div class="grab"></div><div class="shead"><button class="navbtn" style="width:84px" data-cancel>Annuler</button><h2>${it ? "Horaire" : "Nouvel horaire"}</h2><button class="navbtn" style="font-weight:600;width:84px;justify-content:flex-end" data-ok>OK</button></div>
+        <div class="seg" style="margin-top:12px">${Object.entries(SCHED_ACT).map(([k, l]) => `<button class="${act === k ? "on" : ""}" data-act="${k}">${l}</button>`).join("")}</div>
+        <div class="group">
+          <label class="cell"><div class="body">Heure</div><input type="time" class="picker" id="sTime" step="60" value="${esc(it?.time || "23:00")}" style="direction:ltr"></label>
+          <label class="cell"><div class="body">Jours</div><select class="picker" id="sDays">${Object.entries(SCHED_DAYS).map(([k, l]) => `<option value="${k}" ${(it?.days || "all") === k ? "selected" : ""}>${l}</option>`).join("")}</select>${I.chev}</label>
+        </div>
+        <div class="hdr"><span class="grow">Machines (${sel.size})</span></div><div class="group">
+        ${guests.map(g => `<label class="cell icon">${icoBox(g.type === "qemu" ? I.vm : I.ct, g.type === "qemu" ? "indigo" : "teal")}<div class="body"><div class="t ell">${esc(g.name || g.vmid)}</div><div class="s">${kind(g.type)} ${g.vmid}</div></div>
+          <span class="sw"><input type="checkbox" data-g="${g.type}/${g.vmid}" ${sel.has(`${g.type}/${g.vmid}`) ? "checked" : ""} aria-label="${esc(g.name || g.vmid)}"><span></span></span></label>`).join("")}</div>
+        <div class="ftr">Les machines sont traitées dans l'ordre de la liste. Pour décaler une machine (dix minutes après les autres, par exemple), crée un second horaire.</div></div>`;
+    };
+    const close = v => { m.remove(); res(v); };
+    draw();
+    m.addEventListener("change", e => {
+      const k = e.target.dataset.g; if (!k) return;
+      e.target.checked ? sel.add(k) : sel.delete(k);
+      m.querySelector(".hdr .grow").textContent = `Machines (${sel.size})`;
+    });
+    m.addEventListener("click", async e => {
+      const a = e.target.closest("[data-act]");
+      if (a) { act = a.dataset.act; m.querySelectorAll("[data-act]").forEach(b => b.classList.toggle("on", b.dataset.act === act)); return; }
+      if (e.target === m || e.target.closest("[data-cancel]")) return close(false);
+      if (!e.target.closest("[data-ok]")) return;
+      const targets = guests.filter(g => sel.has(`${g.type}/${g.vmid}`)).map(g => ({ node: g.node, type: g.type, vmid: g.vmid }));
+      const time = m.querySelector("#sTime").value, days = m.querySelector("#sDays").value;
+      if (!targets.length) return toast("Choisis au moins une machine");
+      if (await saveSched({ op: it ? "update" : "add", id: it?.id, action: act, time, days, targets, tz: tz() })) close(true);
+    });
+    document.body.appendChild(m);
+  });
+}
+// écran « Horaires » : tous les horaires
+function openSchedView() {
+  S.schOpen = true; $("#schedv").scrollTop = 0; $("#schedv").classList.add("open"); history.pushState({ sv: 1 }, "");
+  renderSchedView(); api("/api/schedules").then(r => { S.sched = r.items; if (S.schOpen) renderSchedView(); }).catch(() => {});
+}
+function closeSchedView() { S.schOpen = false; $("#schedv").classList.remove("open"); }
+function renderSchedView() {
+  const l = (S.sched || []).slice().sort((a, b) => a.time.localeCompare(b.time));
+  $("#schedv").innerHTML = `<div class="navbar" id="svnav"><div class="nt">Horaires</div>
+      <div class="side"><button class="navbtn" onclick="history.back()">${I.back}Serveur</button></div><div class="side r"></div></div>
+    <h1 class="large">Horaires</h1>
+    <div class="group">${!S.sched ? `<div class="cell"><div class="body mute">Chargement…</div></div>` : l.map(x => `<label class="cell icon tap" data-sedit="${esc(x.id)}">${icoBox(x.action === "start" ? I.play : I.power, x.action === "start" ? "green" : "orange")}
+        <div class="body"><div class="t">${SCHED_ACT[x.action]} à ${esc(x.time)} <span class="mute" style="font-size:13px">${SCHED_DAYS[x.days]}</span></div>
+        <div class="s" style="line-height:1.35">${x.targets.map(t => esc(tName(t))).join(", ")}</div></div>
+        <span class="sw"><input type="checkbox" data-stog="${esc(x.id)}" ${x.enabled ? "checked" : ""} aria-label="Actif"><span></span></span></label>`).join("")}
+      <button class="cell icon tap act" id="svAdd">${icoBox(I.plus, "accent")}<div class="body">Nouvel horaire</div></button></div>
+    <div class="ftr">Touche un horaire pour le modifier. Exécutés par le serveur PVE Hub à ton heure, même app fermée ; chaque action est notée dans le Journal. « Éteindre » fait un arrêt propre.</div>
+    <div style="height:calc(40px + env(safe-area-inset-bottom))"></div>`;
+}
+$("#schedv").addEventListener("scroll", () => $("#svnav")?.classList.toggle("scrolled", $("#schedv").scrollTop > 30), { passive: true });
+$("#schedv").addEventListener("change", async e => { const id = e.target.dataset.stog; if (id) { await saveSched({ op: "toggle", id }); renderSchedView(); } });
+$("#schedv").addEventListener("click", async e => {
+  if (e.target.closest(".sw")) return;  // l'interrupteur ne doit pas ouvrir l'éditeur
+  if (e.target.closest("#svAdd")) { if (await editSchedule(null, [])) renderSchedView(); return; }
+  const r = e.target.closest("[data-sedit]"); if (!r) return;
+  e.preventDefault();
+  const it = S.sched.find(x => x.id === r.dataset.sedit); if (!it) return;
+  const i = await actionSheet(`${SCHED_ACT[it.action]} à ${esc(it.time)}`, SCHED_DAYS[it.days], [{ label: "Modifier" }, { label: "Supprimer l'horaire", danger: true }]);
+  if (i === 0 && await editSchedule(it)) renderSchedView();
+  if (i === 1 && await saveSched({ op: "delete", id: it.id })) renderSchedView();
+});
 function optsHtml() {
   const on = guestCfg?.config?.onboot == 1;
   return `<label class="cell icon">${icoBox(I.power, "green")}<div class="body">Démarrer avec le serveur</div>
@@ -1100,6 +1173,7 @@ function openFromHash() {
   else if (h === "report") openLatestReport();
   else if (h === "security") openSettings();
   else if (h === "apps") setView("apps");
+  else if (h === "sched") openSchedView();
   else if (h === "journal" || h.startsWith("journal=")) openJournal(h.split("=")[1]);
   else if (h.startsWith("g=") && findGuest(h.slice(2))) { setView("guests"); openGuest(h.slice(2)); }
 }
@@ -2007,6 +2081,7 @@ async function start() {
   $("#login").classList.add("hide"); $("#app").classList.remove("hide");
   applyHermes(); setView(S.view); loop();
   if ("serviceWorker" in navigator && window.isSecureContext) navigator.serviceWorker.register("/sw.js").catch(() => {});
+  api("/api/schedules").then(r => { S.sched = r.items; }).catch(() => {});
   await initChats();
   openFromHash(); addEventListener("hashchange", openFromHash);
   checkVersion(); loadMaint(); setInterval(() => document.visibilityState === "visible" && loadMaint(), 300000);

@@ -1312,34 +1312,66 @@ SCHED_DAYS = {"all": range(7), "week": range(5), "weekend": (5, 6)}  # 0 = lundi
 _sched_lock = threading.Lock()
 
 
+def sched_norm(it):
+    """Ancien format (une machine : node/type/vmid) → liste « targets »."""
+    if "targets" not in it:
+        it = {**it, "targets": [{"node": it.pop("node", ""), "type": it.pop("type"), "vmid": it.pop("vmid")}]}
+    return it
+
+
+def load_sched():
+    return [sched_norm(it) for it in read_json(SCHED_FILE, [])]
+
+
 def r_schedules(_):
-    return {"items": read_json(SCHED_FILE, [])}
+    return {"items": load_sched()}
+
+
+def sched_fields(d):
+    """Champs validés d'un horaire : action, heure, jours, machines (1 à 50)."""
+    if d.get("action") not in ("start", "shutdown"):
+        raise ApiError(400, "Action invalide")
+    if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", str(d.get("time", ""))):
+        raise ApiError(400, "Heure invalide")
+    if d.get("days") not in SCHED_DAYS:
+        raise ApiError(400, "Jours invalides")
+    raw = d.get("targets") if isinstance(d.get("targets"), list) else [d]
+    targets, seen = [], set()
+    for t in raw[:50]:
+        node, typ, vmid = guest_args(t if isinstance(t, dict) else {})
+        if (typ, vmid) not in seen:
+            seen.add((typ, vmid))
+            targets.append({"node": node, "type": typ, "vmid": vmid})
+    if not targets:
+        raise ApiError(400, "Choisis au moins une machine")
+    return {"action": d["action"], "time": d["time"], "days": d["days"], "targets": targets}
 
 
 def r_schedules_save(d):
     with _sched_lock:
-        items = read_json(SCHED_FILE, [])
+        items = load_sched()
         op, sid = d.get("op"), str(d.get("id", ""))
         if op == "add":
-            node, typ, vmid = guest_args(d)
-            if d.get("action") not in ("start", "shutdown"):
-                raise ApiError(400, "Action invalide")
-            if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", str(d.get("time", ""))):
-                raise ApiError(400, "Heure invalide")
-            if d.get("days") not in SCHED_DAYS:
-                raise ApiError(400, "Jours invalides")
-            items.append({"id": secrets.token_hex(4), "node": node, "type": typ, "vmid": vmid, "action": d["action"],
-                          "time": d["time"], "days": d["days"], "enabled": True})
-            if d.get("tz"):  # l'heure saisie est celle du téléphone : le serveur, lui, est en UTC
-                r_alert_settings({"tz": d["tz"]})
+            items.append({"id": secrets.token_hex(4), **sched_fields(d), "enabled": True})
+        elif op == "update":
+            f = sched_fields(d)
+            items = [{**it, **f} if it["id"] == sid else it for it in items]
         elif op == "toggle":
             for it in items:
                 if it["id"] == sid:
                     it["enabled"] = not it["enabled"]
         elif op == "delete":
             items = [it for it in items if it["id"] != sid]
+        elif op == "remove_target":  # retirer une machine d'un horaire (l'horaire disparaît s'il n'en reste aucune)
+            vmid, typ = int(d.get("vmid") or 0), d.get("type")
+            for it in items:
+                if it["id"] == sid:
+                    it["targets"] = [t for t in it["targets"] if not (t["vmid"] == vmid and t["type"] == typ)]
+            items = [it for it in items if it["targets"]]
         else:
             raise ApiError(400, "Demande invalide")
+        if op in ("add", "update") and d.get("tz"):  # l'heure saisie est celle du téléphone : le serveur, lui, est en UTC
+            r_alert_settings({"tz": d["tz"]})
         write_json(SCHED_FILE, items)
     return {"items": items}
 
@@ -1358,18 +1390,26 @@ def due_schedules(items, ln, done):
 
 
 def run_schedule(it, guests):
-    g = next((g for g in guests if g["vmid"] == it["vmid"] and g["type"] == it["type"]), None)
-    label = gname(g) if g else f"{'VM' if it['type'] == 'qemu' else 'CT'} {it['vmid']}"
+    """Allume ou éteint chaque machine de l'horaire (dans l'ordre) ; une ligne au Journal, plus une alerte par échec."""
+    it = sched_norm(dict(it))
     verb = "Allumage" if it["action"] == "start" else "Extinction"
-    if not g:
-        return log_event("alert", f"{verb} programmé impossible", f"{label} n'existe plus")
-    if (it["action"] == "start") == (g.get("status") == "running"):
-        return  # déjà dans l'état voulu
-    try:
-        pve("POST", f"/nodes/{g['node']}/{it['type']}/{it['vmid']}/status/{it['action']}")
-        log_event("update", f"{verb} programmé : {label}", f"Horaire de {it['time']}", f"/#g={it['type']}/{it['vmid']}")
-    except ApiError as e:
-        log_event("alert", f"{verb} programmé en échec : {label}", e.msg, f"/#g={it['type']}/{it['vmid']}")
+    done = []
+    for t in it["targets"]:
+        g = next((g for g in guests if g["vmid"] == t["vmid"] and g["type"] == t["type"]), None)
+        label = gname(g) if g else f"{'VM' if t['type'] == 'qemu' else 'CT'} {t['vmid']}"
+        if not g:
+            log_event("alert", f"{verb} programmé impossible", f"{label} n'existe plus")
+            continue
+        if (it["action"] == "start") == (g.get("status") == "running"):
+            continue  # déjà dans l'état voulu
+        try:
+            pve("POST", f"/nodes/{g['node']}/{t['type']}/{t['vmid']}/status/{it['action']}")
+            done.append(label)
+        except ApiError as e:
+            log_event("alert", f"{verb} programmé en échec : {label}", e.msg, f"/#g={t['type']}/{t['vmid']}")
+    if done:
+        title = f"{verb} programmé : {done[0]}" if len(done) == 1 else f"{verb} programmé : {len(done)} machines"
+        log_event("update", title, f"Horaire de {it['time']}" + ("" if len(done) == 1 else " — " + ", ".join(done)), "/#sched")
 
 
 def disk_items(nodes, storages, guests):
@@ -1411,7 +1451,7 @@ def monitor_once(ctx):
         storages = pve("GET", "/cluster/resources", {"type": "storage"}) or []
         alerts += check_disk(disk_items(nodes, storages, guests), s["disk_threshold"], state["disk"], now)
     # horaires d'allumage / d'extinction (un arrêt programmé passe par « shutdown » : pas d'alerte « machine arrêtée »)
-    items = read_json(SCHED_FILE, [])
+    items = load_sched()
     if items:
         for it in due_schedules(items, local_now(s), state.setdefault("sched_done", {})):
             run_schedule(it, guests)

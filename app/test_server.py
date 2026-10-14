@@ -336,4 +336,23 @@ srv.run_schedule({"vmid": 104, "type": "qemu", "action": "start", "time": "08:00
 srv.run_schedule({"vmid": 104, "type": "qemu", "action": "shutdown", "time": "23:00"}, G2)   # déjà éteinte : rien
 assert calls == [("POST", "/nodes/pve/qemu/104/status/start")], calls
 assert srv.r_events({})["events"][0]["title"] == "Allumage programmé : VM 104 « jeux »"
+# horaire sur plusieurs machines : ordre respecté, machines déjà éteintes ignorées, une ligne de Journal
+calls.clear()
+G3 = [{"vmid": v, "type": "lxc", "node": "pve", "status": st, "name": f"c{v}"} for v, st in ((106, "running"), (107, "stopped"), (108, "running"))]
+srv.run_schedule({"action": "shutdown", "time": "21:00", "targets": [{"node": "pve", "type": "lxc", "vmid": v} for v in (106, 107, 108)]}, G3)
+assert calls == [("POST", "/nodes/pve/lxc/106/status/shutdown"), ("POST", "/nodes/pve/lxc/108/status/shutdown")], calls
+assert srv.r_events({})["events"][0]["title"] == "Extinction programmée : 2 machines".replace("programmée", "programmé")
+srv.write_json(srv.SCHED_FILE, [{"id": "old", "node": "pve", "type": "qemu", "vmid": 104, "action": "start", "time": "08:00", "days": "all", "enabled": True}])
+assert srv.load_sched()[0]["targets"] == [{"node": "pve", "type": "qemu", "vmid": 104}]    # ancien format repris
+r = srv.r_schedules_save({"op": "add", "action": "shutdown", "time": "21:00", "days": "all",
+                          "targets": [{"node": "pve", "type": "lxc", "vmid": 106}, {"node": "pve", "type": "lxc", "vmid": 107}, {"node": "pve", "type": "lxc", "vmid": 106}]})
+new = r["items"][-1]; assert len(new["targets"]) == 2                                  # doublon retiré
+r = srv.r_schedules_save({"op": "update", "id": new["id"], "action": "shutdown", "time": "22:00", "days": "week", "targets": new["targets"]})
+assert r["items"][-1]["time"] == "22:00" and r["items"][-1]["enabled"] is True
+r = srv.r_schedules_save({"op": "remove_target", "id": new["id"], "type": "lxc", "vmid": 106}); assert len(r["items"][-1]["targets"]) == 1
+r = srv.r_schedules_save({"op": "remove_target", "id": new["id"], "type": "lxc", "vmid": 107}); assert all(i["id"] != new["id"] for i in r["items"])
+try:
+    srv.r_schedules_save({"op": "add", "action": "start", "time": "08:00", "days": "all", "targets": []}); raise AssertionError
+except srv.ApiError:
+    pass
 print("ok")
