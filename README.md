@@ -79,6 +79,10 @@ Le script donne au conteneur l'accès à `/dev/net/tun` (il redémarre une fois)
 pour le connecter à ton compte, puis active l'adresse `https://pvehub.<ton-réseau>.ts.net`. Sur le téléphone :
 app Tailscale connectée au même compte. L'adresse s'affiche aussi dans Réglages → Accès à distance.
 
+**Tailscale déjà installé sur l'hôte ?** Plus simple : publie l'app depuis l'hôte, sans rien installer dans le conteneur :
+`tailscale serve --bg --https=8443 http://<IP-du-conteneur>:8080`. L'app repère cette publication et affiche l'adresse
+dans Réglages.
+
 Pour couper l'accès : `pct exec <ID> -- tailscale logout`. Une migration vers un nouveau conteneur ne reprend pas
 Tailscale : relance la commande ci-dessus après.
 

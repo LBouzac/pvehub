@@ -46,6 +46,15 @@ assert srv.is_up(_fake_tcp(b"")) is None or srv.is_up(_fake_tcp(b"")) is False
 assert srv.is_up(_fake_tcp(b"HTTP/1.0 401 Unauthorized\r\n\r\n")) is True
 assert srv.is_up("http://127.0.0.1:1") is False
 
+# Tailscale de l'hôte : retrouver l'adresse qui redirige vers ce conteneur
+SERVE = {"TCP": {"443": {"HTTPS": True}, "8443": {"HTTPS": True}},
+         "Web": {"host-005.tail1234.ts.net:443": {"Handlers": {"/": {"Proxy": "https+insecure://127.0.0.1:8006"}}},
+                 "host-005.tail1234.ts.net:8443": {"Handlers": {"/": {"Proxy": "http://192.168.1.50:8080"}}}}}
+assert srv.serve_url_for(SERVE, "192.168.1.50", 8080) == "https://host-005.tail1234.ts.net:8443"
+SERVE["Web"]["host-005.tail1234.ts.net:443"]["Handlers"]["/"]["Proxy"] = "http://192.168.1.50:8080"
+assert srv.serve_url_for(SERVE, "192.168.1.50", 8080) == "https://host-005.tail1234.ts.net"
+assert srv.serve_url_for(SERVE, "192.168.1.99", 8080) is None and srv.serve_url_for({}, "x") is None
+
 # sauvegardes planifiées : quelle machine est couverte par quel job
 assert srv.job_covers({"all": 1, "exclude": "104,105"}, 101) and not srv.job_covers({"all": 1, "exclude": "104,105"}, 104)
 assert srv.job_covers({"vmid": "100,101"}, 101) and not srv.job_covers({"vmid": "100,1010"}, 101)

@@ -683,9 +683,36 @@ def r_cron_save(d):
 
 
 # ---------------------------------------------------------------- accès à distance (Tailscale)
+def own_ip():
+    """IP de ce conteneur vue depuis l'hôte Proxmox."""
+    import socket
+    host = urllib.parse.urlsplit(PVE_URL)
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.connect((host.hostname, host.port or 8006))  # UDP : aucun paquet envoyé, juste le choix de l'interface
+        return s.getsockname()[0]
+
+
+def serve_url_for(serve_cfg, ip, port=PORT):
+    """Adresse HTTPS d'un `tailscale serve` (sur l'hôte) qui redirige vers ip:port, sinon None."""
+    for hostport, web in (serve_cfg.get("Web") or {}).items():
+        for handler in (web.get("Handlers") or {}).values():
+            target = urllib.parse.urlsplit(handler.get("Proxy") or "")
+            if target.hostname == ip and (target.port or 80) == port:
+                return "https://" + (hostport[:-4] if hostport.endswith(":443") else hostport)
+    return None
+
+
 def r_remote(_):
-    """État de Tailscale dans ce conteneur, pour afficher l'adresse HTTPS dans Réglages."""
+    """Adresse HTTPS d'accès à distance : Tailscale de l'hôte (serve vers ce conteneur), sinon celui du conteneur."""
     info = {"ctid": read_local("CTID") or None, "repo": UPDATE_REPO}
+    if EXEC_ENABLED:
+        code, out = run_ssh("tailscale serve status --json 2>/dev/null", timeout=10)
+        try:
+            url = serve_url_for(json.loads(out), own_ip()) if code == 0 else None
+        except (ValueError, OSError, AttributeError):
+            url = None
+        if url:
+            return {**info, "installed": True, "state": "Running", "url": url, "via": "host"}
     try:
         p = subprocess.run(["tailscale", "status", "--json"], capture_output=True, timeout=5)
         st = json.loads(p.stdout or b"{}")
