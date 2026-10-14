@@ -174,6 +174,7 @@ canvas{width:100%;height:120px;display:block}
 .alert h3{margin:0 0 4px;font-size:17px;font-weight:600}
 .alert p{margin:0 0 10px;font-size:13px}
 .alert input,.alert select{width:100%;margin-top:8px;padding:7px 8px;font-size:15px;border:.5px solid var(--sep);border-radius:7px;background:var(--card);outline:0}
+.alert .af{display:block;text-align:left;font-size:13px;color:var(--label2);margin-top:10px}.alert .af input{margin-top:3px;color:var(--label)}
 .alert .abtns{display:flex;border-top:.5px solid var(--sep)}
 .alert .abtns button{flex:1;height:44px;color:var(--accent);font-size:17px}
 .alert .abtns button+button{border-left:.5px solid var(--sep);font-weight:600}
@@ -417,6 +418,7 @@ function alertForm(title, msg, fields) {
     const m = document.createElement("div"); m.className = "modal center";
     m.innerHTML = `<form class="alert"><div class="ab"><h3>${title}</h3>${msg ? `<p class="mute">${msg}</p>` : ""}${fields.map(f => f.options
       ? `<select name="${f.name}" aria-label="${esc(f.ph || f.name)}">${f.options.map(o => `<option>${esc(o)}</option>`).join("")}</select>`
+      : f.label ? `<label class="af">${esc(f.label)}<input name="${f.name}" type="${f.type || "text"}" step="${f.step || 1}" min="${f.min ?? ""}" inputmode="${f.step === "any" ? "decimal" : "numeric"}" value="${esc(f.value ?? "")}"></label>`
       : `<input name="${f.name}" type="${f.type || "text"}" placeholder="${esc(f.ph)}" value="${esc(f.value || "")}" aria-label="${esc(f.ph)}">`).join("")}</div>
       <div class="abtns"><button type="button" data-a="0">Annuler</button><button>OK</button></div></form>`;
     const form = m.querySelector("form");
@@ -622,6 +624,7 @@ function renderGuest() {
       <div class="cell icon">${icoBox(I.mem, "blue")}<div class="body"><div class="row"><span class="grow">Mémoire</span><span class="mute">${on ? fb(g.mem) : "–"} / ${fb(g.maxmem)}</span></div>${bar(on ? pct(g.mem, g.maxmem) : 0)}</div></div>
       <div class="cell icon">${icoBox(I.disk, "purple")}<div class="body"><div class="row"><span class="grow">Disque</span><span class="mute">${g.disk ? fb(g.disk) : "–"} / ${fb(g.maxdisk)}</span></div>${bar(pct(g.disk, g.maxdisk))}</div></div>
       <div class="cell icon">${icoBox(I.net, "green")}<div class="body"><div class="row"><span class="grow">Réseau</span><span class="mute">↓ ${fb(g.netin)} · ↑ ${fb(g.netout)}</span></div></div></div>
+      <button class="cell tap act" id="gRes"><div class="body">Modifier les ressources</div></button>
     </div>
     <div class="hdr">Activité</div><div class="group">
       <div class="chartbox">${legend([["--orange", "CPU"], ["--blue", "Mémoire"]])}<canvas id="cvUse"></canvas></div>
@@ -647,6 +650,32 @@ $("#sheet").addEventListener("change", async e => {
   } catch (err) { t.checked = !t.checked; toast("❌ " + err.message); }
   t.disabled = false;
 });
+const diskOf = c => ["rootfs", "scsi0", "virtio0", "sata0", "ide0"].map(k => c[k]).find(Boolean) || "";
+async function editResources() {
+  const g = findGuest(S.guest); if (!g) return;
+  const c = guestCfg?.config || {}, m = diskOf(c).match(/size=([\d.]+)([KMGT]?)/);
+  const cores = c.cores || g.maxcpu, mem = Math.round((c.memory || g.maxmem / 1048576) / 1024 * 100) / 100;
+  const v = await alertForm("Ressources", `${kind(g.type)} ${g.vmid}${m ? ` · disque de ${m[1]} ${m[2] || "G"}o` : ""}`, [
+    { name: "cores", label: "Cœurs", type: "number", value: cores, min: 1 },
+    { name: "memory", label: "Mémoire (Go)", type: "number", value: mem, step: "any", min: 0.25 },
+    { name: "disk_grow", label: "Agrandir le disque de (Go)", type: "number", value: 0, min: 0 }]);
+  if (!v) return;
+  const body = { node: g.node, type: g.type, vmid: g.vmid }, newMem = Math.round(parseFloat(String(v.memory).replace(",", ".")) * 1024);
+  if (+v.cores !== cores) body.cores = +v.cores;
+  if (newMem && newMem !== Math.round(mem * 1024)) body.memory = newMem;
+  if (+v.disk_grow > 0) {
+    if (!await confirmBox(`Agrandir le disque de ${+v.disk_grow} Go ?`, "C'est définitif : Proxmox ne sait pas réduire un disque.", "Agrandir")) return;
+    body.disk_grow = +v.disk_grow;
+  }
+  if (Object.keys(body).length === 3) return toast("Rien n'a changé");
+  const t = toast("⏳ Application…", 120000);
+  try {
+    const r = await api("/api/guest/config", { body });
+    t.remove(); toast(r.restart_needed ? "✅ Enregistré : appliqué au prochain redémarrage de la VM" : "✅ Ressources modifiées", 5000);
+  } catch (err) { t.remove(); return toast("❌ " + err.message, 6000); }
+  guestCfg = await api("/api/guest?" + qs({ node: g.node, type: g.type, vmid: g.vmid })).catch(() => guestCfg);
+  refresh();
+}
 function optsHtml() {
   const on = guestCfg?.config?.onboot == 1;
   return `<label class="cell icon">${icoBox(I.power, "green")}<div class="body">Démarrer avec le serveur</div>
@@ -683,6 +712,7 @@ async function loadGuestExtras() {
     .finally(() => { if ($("#bks")) $("#bks").innerHTML = bksHtml(); });
 }
 $("#sheet").addEventListener("click", async e => {
+  if (e.target.closest("#gRes")) return editResources();
   if (e.target.closest("#gExec")) {
     const g = findGuest(S.guest); if (!g) return;
     history.back(); S.execTarget = JSON.stringify({ type: g.type, node: g.node, vmid: g.vmid }); setView("exec"); $("#cmd")?.focus(); return;

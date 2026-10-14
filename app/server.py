@@ -2044,13 +2044,44 @@ def r_guest(q):
     return {"status": status, "config": {k: config[k] for k in keep if k in config}}
 
 
+DISK_KEYS = ("rootfs", "scsi0", "virtio0", "sata0", "ide0")
+
+
+def int_in(d, k, lo, hi, label):
+    try:
+        v = int(d[k])
+    except (TypeError, ValueError):
+        raise ApiError(400, f"{label} invalide")
+    if not lo <= v <= hi:
+        raise ApiError(400, f"{label} : entre {lo} et {hi}")
+    return v
+
+
 def r_guest_config(d):
-    """Réglages simples d'une machine : démarrage avec le serveur (onboot)."""
+    """Réglages d'une machine : démarrage avec le serveur, cœurs, mémoire (Mo), agrandissement du disque (Go)."""
     node, typ, vmid = guest_args(d)
-    if "onboot" not in d:
+    params = {}
+    if "onboot" in d:
+        params["onboot"] = 1 if d["onboot"] else 0
+    if "cores" in d:
+        params["cores"] = int_in(d, "cores", 1, 128, "Nombre de cœurs")
+    if "memory" in d:
+        params["memory"] = int_in(d, "memory", 64, 1024 * 1024, "Mémoire (Mo)")
+    grow = int_in(d, "disk_grow", 0, 4096, "Agrandissement du disque (Go)") if d.get("disk_grow") else 0
+    if not params and not grow:
         raise ApiError(400, "Rien à changer")
-    pve("PUT", f"/nodes/{node}/{typ}/{vmid}/config", {"onboot": 1 if d["onboot"] else 0})
-    return {"ok": True, "onboot": bool(d["onboot"])}
+    if params:
+        pve("PUT", f"/nodes/{node}/{typ}/{vmid}/config", params)
+    if grow:  # Proxmox ne sait qu'agrandir : « +N G »
+        cfg = pve("GET", f"/nodes/{node}/{typ}/{vmid}/config") or {}
+        disk = next((k for k in DISK_KEYS if k in cfg), None)
+        if not disk:
+            raise ApiError(409, "Disque principal introuvable")
+        wait_pve_task(node, pve("PUT", f"/nodes/{node}/{typ}/{vmid}/resize", {"disk": disk, "size": f"+{grow}G"}))
+    status = (pve("GET", f"/nodes/{node}/{typ}/{vmid}/status/current") or {}).get("status")
+    # une VM allumée applique cœurs et mémoire au prochain démarrage (sauf hotplug) ; un conteneur, tout de suite
+    later = typ == "qemu" and status == "running" and ("cores" in params or "memory" in params)
+    return {"ok": True, **params, "disk_grow": grow, "restart_needed": later}
 
 
 def r_power(d):

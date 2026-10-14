@@ -278,11 +278,22 @@ assert f[104] == {"pm": "apt", "packages": ["openssl"]} and f[105] == {"pm": Non
 assert srv.qm_output(_j.dumps({"pid": 42}))[0] == 124            # délai dépassé : pas un succès
 assert srv.qm_output(_j.dumps({"exitcode": 3, "exited": 1, "err-data": "E"})) == (3, "E")
 assert "qm guest exec 104 --timeout 60" in srv.guest_exec({"type": "qemu", "vmid": 104}, "id", 60)
-# démarrage avec le serveur
+# réglages d'une machine : démarrage avec le serveur, ressources, agrandissement du disque
 put = []
-srv.pve = lambda m, path, params=None, timeout=30: put.append((m, path, params))
-assert srv.r_guest_config({"node": "pve", "type": "lxc", "vmid": 101, "onboot": True})["onboot"] is True
-assert put[-1] == ("PUT", "/nodes/pve/lxc/101/config", {"onboot": 1})
-srv.r_guest_config({"node": "pve", "type": "qemu", "vmid": 104, "onboot": False})
-assert put[-1] == ("PUT", "/nodes/pve/qemu/104/config", {"onboot": 0})
+def fake(m, path, params=None, timeout=30):
+    put.append((m, path, params))
+    if path.endswith("/config") and m == "GET": return {"scsi0": "local-lvm:vm-104-disk-0,size=32G"}
+    if path.endswith("/status/current"): return {"status": "running"}
+    return "UPID:x"
+srv.pve, srv.wait_pve_task = fake, lambda n, u: "OK"
+assert srv.r_guest_config({"node": "pve", "type": "lxc", "vmid": 101, "onboot": True})["onboot"] == 1
+assert put[0] == ("PUT", "/nodes/pve/lxc/101/config", {"onboot": 1})
+put.clear(); r = srv.r_guest_config({"node": "pve", "type": "qemu", "vmid": 104, "cores": 4, "memory": 4096, "disk_grow": 8})
+assert ("PUT", "/nodes/pve/qemu/104/config", {"cores": 4, "memory": 4096}) in put
+assert ("PUT", "/nodes/pve/qemu/104/resize", {"disk": "scsi0", "size": "+8G"}) in put and r["restart_needed"] is True
+for bad in ({"cores": 0}, {"memory": "x"}, {"disk_grow": 99999}, {}):
+    try:
+        srv.r_guest_config({"node": "pve", "type": "lxc", "vmid": 101, **bad}); raise AssertionError(bad)
+    except srv.ApiError:
+        pass
 print("ok")
