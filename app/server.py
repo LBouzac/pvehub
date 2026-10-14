@@ -1167,7 +1167,15 @@ def install_turnkey(job, node, template, name, store, tstore, bridge):
     have = [c.get("volid", "") for c in pve("GET", f"/nodes/{node}/storage/{tstore}/content", {"content": "vztmpl"}) or []]
     if not any(v.endswith("/" + template) for v in have):
         job_log(job, f"Téléchargement du modèle {template}…")
-        st = wait_pve_task(node, pve("POST", f"/nodes/{node}/aplinfo", {"storage": tstore, "template": template}))
+        try:
+            st = wait_pve_task(node, pve("POST", f"/nodes/{node}/aplinfo", {"storage": tstore, "template": template}))
+        except ApiError as e:
+            # droit Datastore.AllocateTemplate absent (installation pas encore mise à jour) : root s'en charge via SSH
+            if "permission" not in e.msg.lower() or not EXEC_ENABLED:
+                raise
+            job_log(job, "Droit manquant pour l'API, téléchargement via SSH…")
+            code, out = run_ssh(f"pveam update >/dev/null; pveam download {shlex.quote(tstore)} {shlex.quote(template)}", timeout=900)
+            st = "OK" if code == 0 else out.strip()[-300:] or f"code {code}"
         if st != "OK":
             raise ApiError(502, f"Téléchargement du modèle : {st}")
     vmid = int(pve("GET", "/cluster/nextid"))
