@@ -1286,9 +1286,65 @@ def install_turnkey(job, node, template, name, store, tstore, bridge):
     job_log(job, f"Conteneur {vmid} créé et démarré.")
 
 
+INSTALLED_FILE = os.path.join(DATA_DIR, "installed.json")  # {vmid: {name, source, url, at}} : apps posées par le Store
+_installed_lock = threading.Lock()
+
+
+def all_guests():
+    return [g for g in pve("GET", "/cluster/resources", {"type": "vm"}) or [] if not g.get("template")]
+
+
+def remember_install(job, before):
+    """Retrouve le conteneur créé (ID lu dans le journal, sinon le seul nouveau) et le note pour l'onglet Apps."""
+    new = [g["vmid"] for g in all_guests() if g["vmid"] not in before]
+    vmid = job.get("vmid") or (new[0] if len(new) == 1 else None)
+    if not vmid:
+        return
+    job["vmid"] = vmid
+    with _installed_lock:
+        inst = read_json(INSTALLED_FILE, {})
+        inst[str(vmid)] = {"name": job["name"], "source": job["source"], "url": job.get("url"), "at": int(time.time())}
+        write_json(INSTALLED_FILE, inst)
+
+
+def uninstall(job, vmid, backup):
+    g = next((g for g in all_guests() if g["vmid"] == vmid), None)
+    if not g:
+        raise ApiError(404, f"La machine {vmid} n'existe plus")
+    node, typ = g["node"], g["type"]
+    if backup:
+        storage = (backup_storages(node) or [None])[0]
+        if not storage:
+            raise ApiError(409, "Aucun stockage de sauvegarde : choisis « Supprimer sans sauvegarde »")
+        job_log(job, f"Sauvegarde de {vmid} sur {storage}…")
+        st = wait_pve_task(node, pve("POST", f"/nodes/{node}/vzdump", {"vmid": vmid, "storage": storage, "mode": "snapshot",
+                                     "compress": "zstd", "notes-template": f"{job['name']} — avant désinstallation (PVE Hub)"}))
+        if st != "OK":
+            raise ApiError(502, f"Sauvegarde : {st} — rien n'a été supprimé")
+    if g.get("status") == "running":
+        job_log(job, "Arrêt…")
+        st = wait_pve_task(node, pve("POST", f"/nodes/{node}/{typ}/{vmid}/status/stop"))
+        if st != "OK":
+            raise ApiError(502, f"Arrêt : {st}")
+    job_log(job, "Suppression du conteneur et de ses disques…")
+    # purge : le retire aussi des tâches de sauvegarde et de la réplication
+    st = wait_pve_task(node, pve("DELETE", f"/nodes/{node}/{typ}/{vmid}?purge=1&destroy-unreferenced-disks=1"))
+    if st != "OK":
+        raise ApiError(502, f"Suppression : {st}")
+    with _installed_lock:
+        inst = read_json(INSTALLED_FILE, {})
+        inst.pop(str(vmid), None)
+        write_json(INSTALLED_FILE, inst)
+
+
 def run_store_job(job, kind, *args):
     try:
-        (install_community if kind == "community" else install_turnkey)(job, *args)
+        if kind == "uninstall":
+            uninstall(job, *args)
+        else:
+            before = {g["vmid"] for g in all_guests()}
+            (install_community if kind == "community" else install_turnkey)(job, *args)
+            remember_install(job, before)
         job["status"] = "done"
     except ApiError as e:
         job.update(status="error", error=e.msg)
@@ -1320,6 +1376,18 @@ def r_store_install(d):
     _store_jobs[job_id] = job = {"id": job_id, "source": source, "name": item["name"], "status": "running",
                                  "at": int(time.time()), "log": []}
     threading.Thread(target=run_store_job, args=(job, *args), daemon=True).start()
+    return {"job": job_id}
+
+
+def r_store_uninstall(d):
+    vmid = int(d.get("vmid") or 0)
+    item = read_json(INSTALLED_FILE, {}).get(str(vmid))
+    if not item:  # garde-fou : seules les apps installées par le Store se désinstallent d'ici
+        raise ApiError(403, "Cette machine n'a pas été installée par le Store")
+    job_id = secrets.token_hex(6)
+    _store_jobs[job_id] = job = {"id": job_id, "kind": "uninstall", "source": item["source"], "name": item["name"],
+                                 "status": "running", "at": int(time.time()), "log": [], "vmid": vmid}
+    threading.Thread(target=run_store_job, args=(job, "uninstall", vmid, bool(d.get("backup", True))), daemon=True).start()
     return {"job": job_id}
 
 
@@ -1641,8 +1709,13 @@ def is_up(url):
 
 
 def r_apps(q):
-    guests = [g for g in pve("GET", "/cluster/resources", {"type": "vm"}) or []
-              if g.get("status") == "running" and not g.get("template")]
+    every = all_guests()
+    guests = [g for g in every if g.get("status") == "running"]
+    with _installed_lock:
+        inst = read_json(INSTALLED_FILE, {})
+        alive = {k: v for k, v in inst.items() if int(k) in {g["vmid"] for g in every}}
+        if alive != inst:  # supprimé depuis Proxmox : on l'oublie
+            write_json(INSTALLED_FILE, alive)
     if q.get("rescan") or time.time() - _scan["at"] > 60:
         with ThreadPoolExecutor(8) as ex:
             ips = dict(zip((g["id"] for g in guests), ex.map(guest_ip, guests)))
@@ -1657,9 +1730,16 @@ def r_apps(q):
             continue
         for p in web:
             url = f"{'https' if p in HTTPS_PORTS else 'http'}://{ip}{'' if p in (80, 443) else f':{p}'}{'/web' if p == 32400 else ''}"
-            base = g.get("name") or str(g["vmid"])
+            st = alive.get(str(g["vmid"]))
+            base = st["name"] if st else g.get("name") or str(g["vmid"])
             apps.append({"id": f"{g['id']}:{p}", "name": f"{base} · {PORT_NAMES.get(p) or p}", "base": base,
-                         "url": url, "guest": f"{g['type']}/{g['vmid']}"})
+                         "url": url, "guest": f"{g['type']}/{g['vmid']}", "store": g["vmid"] if st else None})
+    seen = {a["store"] for a in apps}
+    for g in guests:  # app du Store dont aucun port n'a été détecté : on garde l'adresse affichée à l'installation
+        st = alive.get(str(g["vmid"]))
+        if st and st.get("url") and g["vmid"] not in seen:
+            apps.append({"id": f"store:{g['vmid']}", "name": st["name"], "url": st["url"],
+                         "guest": f"{g['type']}/{g['vmid']}", "store": g["vmid"]})
     for link in cfg["links"]:
         apps.append({**link, "custom": True})
     for a in apps:
@@ -1852,6 +1932,7 @@ def r_auth(_):
 
 ROUTES = {
     ("GET", "/api/auth"): r_auth,
+    ("POST", "/api/store/uninstall"): r_store_uninstall,
     ("GET", "/api/overview"): r_overview,
     ("GET", "/api/rrd"): r_rrd,
     ("GET", "/api/guest"): r_guest,

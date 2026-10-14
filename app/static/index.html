@@ -705,7 +705,7 @@ function renderApps() {
     ${list.length || S.appsEdit ? `<div class="appgrid ${S.appsEdit ? "edit" : ""}">${list.map(appTile).join("")}
       ${S.appsEdit ? `<button class="app add" data-add><span class="ai">+</span><span class="an">Ajouter</span></button>` : ""}</div>`
       : `<div class="empty">Aucune app web trouvée.<br>Touche « Modifier » pour ajouter un lien.</div>`}
-    <div class="ftr" style="margin-top:24px">${S.appsEdit ? "Touche une app pour la renommer, changer son adresse ou la masquer."
+    <div class="ftr" style="margin-top:24px">${S.appsEdit ? "Touche une app pour la renommer, changer son adresse ou la masquer. Les apps installées par le Store peuvent aussi être désinstallées."
       : S.appsScan ? "Détectées automatiquement sur tes machines allumées. Point vert : l'app répond."
       : "Active la section Commandes pour détecter les apps automatiquement. Tu peux aussi ajouter des liens à la main."}</div>
     ${S.appsEdit ? "" : `<div class="group" style="margin-top:16px"><button class="cell tap act" id="rescan"><div class="body">Rechercher de nouvelles apps</div></button></div>`}`;
@@ -725,12 +725,25 @@ $("#v-apps").addEventListener("click", async e => {
   const a = S.apps.find(x => x.id === t.dataset.app); if (!a) return;
   const btns = [{ label: "Renommer" }, { label: "Changer l'adresse" }, { label: a.hidden ? "Afficher" : "Masquer" }];
   if (a.custom) btns.push({ label: "Supprimer le lien", danger: true });
+  if (a.store) btns.push({ label: "Désinstaller l'app…", danger: true });
   const i = await actionSheet(esc(a.name), esc(a.url), btns);
+  if (a.store && i === btns.length - 1) return uninstallApp(a);
   if (i === 0) { const v = await alertForm("Renommer", "Laisse vide pour revenir au nom d'origine.", [{ name: "name", ph: "Nom", value: a.name }]); if (v) saveApp({ op: "edit", id: a.id, name: v.name }); }
   if (i === 1) { const v = await alertForm("Adresse", "", [{ name: "url", ph: "http://…", value: a.url }]); if (v) saveApp({ op: "edit", id: a.id, url: v.url }); }
   if (i === 2) saveApp({ op: "edit", id: a.id, hidden: !a.hidden });
   if (i === 3) saveApp({ op: "delete", id: a.id });
 });
+
+async function uninstallApp(a) {
+  const i = await actionSheet(`Désinstaller ${esc(a.name)} ?`, `Le conteneur ${a.store} et ses disques seront supprimés.`,
+    [{ label: "Sauvegarder puis supprimer", danger: true }, { label: "Supprimer sans sauvegarde", danger: true }]);
+  if (i < 0) return;
+  try {
+    const r = await api("/api/store/uninstall", { body: { vmid: a.store, backup: i === 0 } });
+    S.store.jobs[r.job] = { id: r.job, kind: "uninstall", name: a.name, status: "running", log: [] }; saveJobs();
+    followJob(S.store.jobs[r.job]);
+  } catch (e) { toast("❌ " + e.message, 6000); }
+}
 
 // ---------- commandes
 const PRESETS = ["uptime", "df -h", "free -h", "top -bn1 | head -15", "ip -br a", "systemctl --failed", "apt list --upgradable 2>/dev/null", "docker ps"];
@@ -992,7 +1005,7 @@ function renderStore() {
     <div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="storeQ" type="search" placeholder="Rechercher une app" value="${esc(S.store.q)}" aria-label="Rechercher une app"></div>
     ${tags.length ? `<div class="chips" style="margin-bottom:12px" id="storeTags"><button class="chip" data-tag="" style="${S.store.tag ? "" : "background:var(--accent);color:var(--on-accent)"}">Toutes</button>${tags.map(t =>
       `<button class="chip" data-tag="${esc(t)}" style="font-family:var(--font);${S.store.tag === t ? "background:var(--accent);color:var(--on-accent)" : ""}">${esc(t)}</button>`).join("")}</div>` : ""}
-    ${running.length ? `<div class="group" style="margin-bottom:14px">${running.map(j => `<button class="cell icon tap" data-job="${j.id}">${icoBox(I.backup, "accent")}<div class="body"><div class="t">Installation de ${esc(j.name)}…</div><div class="s">Touche pour suivre</div></div>${I.chev}</button>`).join("")}</div>` : ""}
+    ${running.length ? `<div class="group" style="margin-bottom:14px">${running.map(j => `<button class="cell icon tap" data-job="${j.id}">${icoBox(I.backup, "accent")}<div class="body"><div class="t">${j.kind === "uninstall" ? "Désinstallation" : "Installation"} de ${esc(j.name)}…</div><div class="s">Touche pour suivre</div></div>${I.chev}</button>`).join("")}</div>` : ""}
     <div class="group" id="storeList">`;
   if (S.store.err) h += `<div class="cell"><div class="body mute">${esc(S.store.err)}</div></div>`;
   else if (!r) h += `<div class="cell"><div class="body mute">Chargement…</div></div>`;
@@ -1072,15 +1085,15 @@ function followJob(job) {
   const m = document.createElement("div"); m.className = "modal";
   let stop = false;
   const draw = () => {
-    const done = job.status !== "running";
+    const done = job.status !== "running", un = job.kind === "uninstall";
     m.innerHTML = `<div class="card-sheet"><div class="grab"></div><div class="shead"><span style="width:84px"></span><h2>${esc(job.name)}</h2><button class="navbtn" style="font-weight:600;width:84px;justify-content:flex-end" data-close>${done ? "OK" : "Masquer"}</button></div>
-      <div class="group" style="margin-top:12px"><div class="cell"><div class="body"><div class="t">${job.status === "running" ? "⏳ Installation en cours…" : job.status === "done" ? "✅ Installé" : "❌ Échec"}</div>
+      <div class="group" style="margin-top:12px"><div class="cell"><div class="body"><div class="t">${job.status === "running" ? (un ? "⏳ Désinstallation en cours…" : "⏳ Installation en cours…") : job.status === "done" ? (un ? "✅ Désinstallé" : "✅ Installé") : "❌ Échec"}</div>
         ${job.error ? `<div class="s" style="color:var(--red)">${esc(job.error)}</div>` : ""}${job.vmid ? `<div class="s">Conteneur ${job.vmid}</div>` : ""}</div></div>
-        ${job.url ? `<a class="cell tap act" href="${esc(job.url)}" target="_blank" rel="noopener"><div class="body">Ouvrir ${esc(job.url)}</div></a>` : ""}
+        ${job.url && !un ? `<a class="cell tap act" href="${esc(job.url)}" target="_blank" rel="noopener"><div class="body">Ouvrir ${esc(job.url)}</div></a>` : ""}
         ${job.password ? `<div class="cell"><div class="body">Mot de passe root</div><div class="v" style="font-family:var(--mono);font-size:15px">${esc(job.password)}</div></div>
           <button class="cell tap act" data-copypw><div class="body">Copier le mot de passe</div></button>` : ""}</div>
       ${job.password && done ? `<div class="ftr" style="line-height:1.4">Dernière étape : dans Proxmox, ouvre la <b>Console</b> du conteneur ${job.vmid} et connecte-toi en <b>root</b> avec ce mot de passe. L'assistant TurnKey te demande alors les mots de passe de l'application et termine sa configuration. Note ce mot de passe : il ne sera plus affiché.</div>` : ""}
-      ${done && job.status === "done" && !job.password ? `<div class="ftr">L'app apparaîtra dans l'onglet Apps à la prochaine recherche.</div>` : ""}
+      ${done && job.status === "done" && !job.password ? `<div class="ftr">${un ? "La sauvegarde éventuelle reste sur le stockage indiqué dans le journal : restaurable depuis Proxmox (stockage → Sauvegardes)." : "L'app apparaîtra dans l'onglet Apps (Modifier → toucher l'app pour la désinstaller)."}</div>` : ""}
       <div class="hdr">Journal</div><div class="group"><pre class="out" id="jobLog">${esc((job.log || []).slice(-40).join("\n") || "…")}</pre></div></div>`;
     const pre = m.querySelector("#jobLog"); pre.scrollTop = pre.scrollHeight;
   };
@@ -1095,7 +1108,7 @@ function followJob(job) {
       await new Promise(r => setTimeout(r, 2000));
       try { Object.assign(job, await api("/api/store/job?" + qs({ id: job.id }))); }
       catch (e) { job.status = "error"; job.error = e.message; }
-      if (job.status !== "running") { saveJobs(); S.apps = null; if (job.status === "done") toast(`✅ ${job.name} installé`); }
+      if (job.status !== "running") { saveJobs(); S.apps = null; if (job.status === "done") toast(`✅ ${job.name} ${job.kind === "uninstall" ? "désinstallé" : "installé"}`); if (S.view === "apps") loadApps(); }
       if (!stop) draw();
     }
   })();

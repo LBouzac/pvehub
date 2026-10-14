@@ -34,6 +34,7 @@ for bad in ("javascript:alert(1)", "ftp://x", "http://", "x" * 400):
 assert srv.clean_url(" http://192.168.1.1 ") == "http://192.168.1.1"
 # is_up : un port qui ne parle pas HTTP ne doit jamais faire planter la page (bug « Erreur interne »)
 import socket, threading
+REAL_THREAD = threading.Thread
 def _fake_tcp(reply):
     s = socket.socket(); s.bind(("127.0.0.1", 0)); s.listen()
     def serve():
@@ -178,4 +179,40 @@ for i in range(35):
     srv.log_login(i % 2 == 0, "100.64.0.1", "", "Mozilla/5.0 (iPhone)")
 st = srv.auth_state()
 assert len(st["log"]) == 30 and st["gen"] == 2 and st["warned"], st.keys()
+# store : suivi des apps installées, désinstallation (sauvegarde → arrêt → suppression), fusion dans l'onglet Apps
+srv.threading.Thread = REAL_THREAD
+srv.INSTALLED_FILE, srv.APPS_FILE = os.path.join(srv.DATA_DIR, "inst.json"), os.path.join(srv.DATA_DIR, "apps.json")
+GUESTS = [{"vmid": 101, "node": "pve", "type": "lxc", "status": "running", "name": "hermes", "id": "lxc/101"}]
+calls = []
+def fake_pve(m, path, params=None, timeout=30):
+    calls.append((m, path.split("?")[0]))
+    if path == "/cluster/resources": return GUESTS
+    if path.endswith("/storage"): return [{"storage": "local"}]
+    return "UPID:x"
+srv.pve, srv.wait_pve_task = fake_pve, lambda n, u: "OK"
+job = {"name": "2FAuth", "source": "community", "log": []}
+GUESTS.append({"vmid": 120, "node": "pve", "type": "lxc", "status": "running", "name": "2fauth", "id": "lxc/120"})
+srv.remember_install(job, {101})                           # pas d'ID dans le journal : le seul nouveau conteneur
+assert job["vmid"] == 120 and "120" in srv.read_json(srv.INSTALLED_FILE, {})
+job["url"] = "http://192.0.2.9:8000"; srv.remember_install(job, {101})
+srv._scan.update(at=srv.time.time(), data={"ips": {"lxc/120": "192.0.2.9"}, "ports": {}})
+srv.is_up = lambda u: True
+apps = srv.r_apps({})["apps"]
+assert [(a["name"], a["store"]) for a in apps] == [("2FAuth", 120)], apps   # aucun port vu : lien gardé de l'installation
+srv._scan["data"]["ports"] = {"lxc/120": {8000}}
+apps = srv.r_apps({})["apps"]
+assert [(a["name"], a["url"], a["store"]) for a in apps] == [("2FAuth", "http://192.0.2.9:8000", 120)], apps
+try:
+    srv.r_store_uninstall({"vmid": 101}); raise AssertionError("machine hors Store désinstallable")
+except srv.ApiError:
+    pass
+calls.clear(); srv.uninstall({"name": "2FAuth", "log": []}, 120, True)
+assert [c for c in calls if c[0] != "GET"] == [("POST", "/nodes/pve/vzdump"), ("POST", "/nodes/pve/lxc/120/status/stop"),
+                                              ("DELETE", "/nodes/pve/lxc/120")], calls
+assert srv.read_json(srv.INSTALLED_FILE, {}) == {}
+srv.wait_pve_task = lambda n, u: "backup failed"; calls.clear()
+try:
+    srv.uninstall({"name": "x", "log": []}, 120, True); raise AssertionError
+except srv.ApiError as e:
+    assert "rien n'a été supprimé" in e.msg and not any(c[0] == "DELETE" for c in calls)
 print("ok")

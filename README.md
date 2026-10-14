@@ -220,7 +220,16 @@ Onglet **Apps** → icône de sac en haut à droite.
   3. Dans Proxmox, ouvre la **Console** du nouveau conteneur et connecte-toi en root : l'assistant TurnKey demande
      les mots de passe de l'application et termine la configuration.
 
-Les nouvelles apps apparaissent ensuite dans l'onglet Apps (« Rechercher de nouvelles apps »).
+Les nouvelles apps apparaissent ensuite dans l'onglet Apps, sous leur nom du Store. Si aucun port web n'est détecté,
+l'adresse affichée à l'installation sert de lien.
+
+**Désinstaller** : onglet Apps → **Modifier** → touche l'app → **Désinstaller l'app…**
+- « Sauvegarder puis supprimer » : sauvegarde complète du conteneur, puis arrêt et suppression (disques compris).
+  Si la sauvegarde échoue, rien n'est supprimé. Pour récupérer l'app plus tard, restaure cette sauvegarde depuis
+  Proxmox (stockage → Sauvegardes).
+- « Supprimer sans sauvegarde » : définitif.
+- Seules les apps installées par le Store proposent ce bouton ; tes autres machines ne peuvent pas être supprimées
+  d'ici.
 
 ## 6. Passer d'un ancien conteneur Debian à Alpine
 
