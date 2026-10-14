@@ -237,19 +237,71 @@ Actions possibles : start, shutdown (arrêt propre), stop (arrêt forcé), reboo
 
 # ---------------------------------------------------------------- Auth
 
+# data/auth.json : {"gen": n, "pw": "pbkdf2$…" (remplace APP_PASSWORD une fois changé dans l'app), "log": [...], "warned": t}
+AUTH_FILE = os.path.join(DATA_DIR, "auth.json")
+_auth_lock = threading.Lock()
+
+
+def auth_state():
+    return read_json(AUTH_FILE, {})
+
+
+def hash_pw(pw, salt=None, it=200_000):
+    salt = salt or secrets.token_hex(16)
+    return f"pbkdf2${it}${salt}${hashlib.pbkdf2_hmac('sha256', pw.encode(), salt.encode(), it).hex()}"
+
+
+def check_password(pw):
+    stored = auth_state().get("pw")
+    if stored:
+        _, it, salt, _h = stored.split("$")
+        return hmac.compare_digest(hash_pw(pw, salt, int(it)), stored)
+    return hmac.compare_digest(pw.encode(), APP_PASSWORD.encode())
+
+
+def auth_enabled():
+    return bool(APP_PASSWORD or auth_state().get("pw"))
+
+
+def _sign(exp, gen):
+    return hmac.new(APP_SECRET, f"{exp}.{gen}".encode(), hashlib.sha256).hexdigest()
+
+
 def make_session():
-    exp = str(int(time.time()) + SESSION_DAYS * 86400)
-    sig = hmac.new(APP_SECRET, exp.encode(), hashlib.sha256).hexdigest()
-    return f"{exp}.{sig}"
+    exp, gen = int(time.time()) + SESSION_DAYS * 86400, auth_state().get("gen", 0)
+    return f"{exp}.{gen}.{_sign(exp, gen)}"
 
 
 def valid_session(value):
+    # « gen » change quand on déconnecte tous les appareils ou change le mot de passe : les anciens cookies meurent
     try:
-        exp, sig = value.split(".", 1)
-        good = hmac.new(APP_SECRET, exp.encode(), hashlib.sha256).hexdigest()
-        return hmac.compare_digest(sig, good) and int(exp) > time.time()
+        exp, gen, sig = value.split(".")
+        return (hmac.compare_digest(sig, _sign(exp, gen)) and int(exp) > time.time()
+                and int(gen) == auth_state().get("gen", 0))
     except (ValueError, AttributeError):
         return False
+
+
+def bump_gen(**changes):
+    with _auth_lock:
+        st = auth_state()
+        st.update(changes, gen=st.get("gen", 0) + 1)
+        write_json(AUTH_FILE, st)
+
+
+def log_login(ok, ip, who, ua):
+    """Garde les 30 dernières tentatives ; prévient par notification en cas d'échec (au plus une fois par 10 min)."""
+    now = int(time.time())
+    with _auth_lock:
+        st = auth_state()
+        st["log"] = ([{"t": now, "ok": ok, "ip": ip[:64], "who": who[:80], "ua": ua[:120]}] + st.get("log", []))[:30]
+        warn = not ok and now - st.get("warned", 0) > 600
+        if warn:
+            st["warned"] = now
+        write_json(AUTH_FILE, st)
+    if warn:
+        threading.Thread(target=send_push, args=("🔐 Mot de passe incorrect",
+                         f"Tentative de connexion refusée depuis {who or ip}.", "/#security", "login"), daemon=True).start()
 
 
 # ---------------------------------------------------------------- HTTP
@@ -265,6 +317,23 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         if os.environ.get("DEBUG"):
             super().log_message(fmt, *args)
+
+    def end_headers(self):
+        # interdit d'afficher l'app dans un cadre d'un autre site (clics piégés)
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Content-Security-Policy", "frame-ancestors 'none'")
+        self.send_header("Referrer-Policy", "same-origin")
+        super().end_headers()
+
+    def client(self):
+        # X-Forwarded-For / Tailscale-User-Login viennent de « tailscale serve » ; falsifiables en accès direct, juste pour le journal
+        ip = (self.headers.get("X-Forwarded-For") or self.client_address[0]).split(",")[0].strip()
+        return ip, self.headers.get("Tailscale-User-Login", ""), self.headers.get("User-Agent", "")
+
+    def cookie(self, value, max_age):
+        https = self.headers.get("X-Forwarded-Proto") == "https" or (self.headers.get("Origin") or "").startswith("https://")
+        # Secure seulement en HTTPS, sinon le navigateur refuserait le cookie en http://IP locale
+        return {"Set-Cookie": f"pvehub={value}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=Strict{'; Secure' if https else ''}"}
 
     # -- helpers
     def send_json(self, obj, status=200, extra=None):
@@ -290,7 +359,7 @@ class Handler(BaseHTTPRequestHandler):
             raise ApiError(400, "JSON invalide")
 
     def authed(self):
-        if not APP_PASSWORD:
+        if not auth_enabled():
             return True
         c = cookies.SimpleCookie(self.headers.get("Cookie", ""))
         return "pvehub" in c and valid_session(c["pvehub"].value)
@@ -330,10 +399,14 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/login" and method == "POST":
                 return self.login()
             if path == "/api/logout" and method == "POST":
-                return self.send_json({"ok": True}, extra={
-                    "Set-Cookie": "pvehub=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict"})
+                return self.send_json({"ok": True}, extra=self.cookie("", 0))
             if not self.authed():
                 raise ApiError(401, "Non connecté")
+            if path == "/api/auth/revoke" and method == "POST":
+                bump_gen()  # cet appareil reçoit aussitôt un nouveau cookie, les autres sont déconnectés
+                return self.send_json({"ok": True}, extra=self.cookie(make_session(), SESSION_DAYS * 86400))
+            if path == "/api/auth/password" and method == "POST":
+                return self.change_password()
             route = ROUTES.get((method, path))
             if not route:
                 raise ApiError(404, "Route inconnue")
@@ -354,11 +427,25 @@ class Handler(BaseHTTPRequestHandler):
 
     def login(self):
         d = self.body()
-        if not APP_PASSWORD or hmac.compare_digest(str(d.get("password", "")), APP_PASSWORD):
-            return self.send_json({"ok": True}, extra={
-                "Set-Cookie": f"pvehub={make_session()}; Path=/; Max-Age={SESSION_DAYS * 86400}; HttpOnly; SameSite=Strict"})
+        if not auth_enabled():
+            return self.send_json({"ok": True})
+        ok = check_password(str(d.get("password", "")))
+        log_login(ok, *self.client())
+        if ok:
+            return self.send_json({"ok": True}, extra=self.cookie(make_session(), SESSION_DAYS * 86400))
         time.sleep(1.5)
         raise ApiError(403, "Mot de passe incorrect")
+
+    def change_password(self):
+        d = self.body()
+        new = str(d.get("new", ""))
+        if auth_enabled() and not check_password(str(d.get("current", ""))):
+            time.sleep(1.5)
+            raise ApiError(403, "Mot de passe actuel incorrect")
+        if len(new) < 10 or len(new) > 200:
+            raise ApiError(400, "Le nouveau mot de passe doit faire au moins 10 caractères")
+        bump_gen(pw=hash_pw(new))  # les autres appareils devront se reconnecter
+        return self.send_json({"ok": True}, extra=self.cookie(make_session(), SESSION_DAYS * 86400))
 
     # -- chat (stream SSE)
     def chat(self):
@@ -1758,7 +1845,13 @@ def r_tasks(q):
     return {"items": pve("GET", f"/nodes/{q['node']}/tasks", {"limit": 20}) or []}
 
 
+def r_auth(_):
+    st = auth_state()
+    return {"enabled": auth_enabled(), "custom": bool(st.get("pw")), "log": st.get("log", [])}
+
+
 ROUTES = {
+    ("GET", "/api/auth"): r_auth,
     ("GET", "/api/overview"): r_overview,
     ("GET", "/api/rrd"): r_rrd,
     ("GET", "/api/guest"): r_guest,
@@ -1801,7 +1894,7 @@ ROUTES = {
 
 
 if __name__ == "__main__":
-    if not APP_PASSWORD:
+    if not auth_enabled():
         print("⚠️  APP_PASSWORD vide : l'interface est accessible sans mot de passe.", file=sys.stderr)
     threading.Thread(target=monitor_loop, daemon=True).start()
     srv = ThreadingHTTPServer((HOST, PORT), Handler)

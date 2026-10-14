@@ -162,4 +162,20 @@ try:
     raise AssertionError("heure invalide acceptée")
 except srv.ApiError:
     pass
+# sécurité : sessions révocables, mot de passe changé dans l'app, journal des connexions
+srv.AUTH_FILE = os.path.join(srv.DATA_DIR, "auth.json")
+srv.APP_PASSWORD = "initial-pass"
+srv.send_push = lambda *a: 0
+srv.threading.Thread = lambda target, daemon, args=(): type("T", (), {"start": lambda self: target(*args)})()
+assert srv.check_password("initial-pass") and not srv.check_password("initial-pas")
+c1 = srv.make_session()
+assert srv.valid_session(c1) and not srv.valid_session(c1[:-1] + ("1" if c1[-1] == "0" else "0")) and not srv.valid_session("123.abc")
+srv.bump_gen()
+assert not srv.valid_session(c1) and srv.valid_session(srv.make_session())       # « déconnecter les autres appareils »
+srv.bump_gen(pw=srv.hash_pw("nouveau-mot-de-passe"))
+assert srv.check_password("nouveau-mot-de-passe") and not srv.check_password("initial-pass")
+for i in range(35):
+    srv.log_login(i % 2 == 0, "100.64.0.1", "", "Mozilla/5.0 (iPhone)")
+st = srv.auth_state()
+assert len(st["log"]) == 30 and st["gen"] == 2 and st["warned"], st.keys()
 print("ok")

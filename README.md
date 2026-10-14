@@ -254,7 +254,7 @@ exit
 
 | Réglage | Rôle |
 |---|---|
-| `APP_PASSWORD` | Mot de passe de l'app |
+| `APP_PASSWORD` | Mot de passe de l'app, tant qu'il n'a pas été changé dans Réglages → Sécurité |
 | `HERMES_URL` / `HERMES_KEY` | Adresse et clé de l'API Hermes (vide = sans Hermes) |
 | `PVE_URL` / `PVE_TOKEN` | Adresse de l'API Proxmox et jeton (créés par l'installeur) |
 | `PVE_VERIFY_SSL` | `true` si ton Proxmox a un certificat valide |
@@ -296,6 +296,7 @@ Anciens conteneurs Debian : `journalctl -u pvehub -n 50` et `systemctl restart p
 | Store : « Permission check failed … SDN.Use » ou « … Datastore.AllocateTemplate » | Mets PVE Hub à jour : la mise à jour donne à `pvehub@pve` le droit réseau (rôle PVESDNUser) et le droit de télécharger des modèles (rôle dédié PVEHubTemplates, sur les stockages uniquement) |
 | Store : « Catalogue injoignable » | Le conteneur doit pouvoir joindre `codeload.github.com`. Réessaie avec Actualiser |
 | Store : l'installation d'un script communautaire échoue ou bloque | Le journal montre où. Relance-la depuis le Shell avec « Copier la commande » pour voir les questions éventuelles |
+| Mot de passe oublié | Dans le Shell : `pct exec <ID> -- sh -c 'rm -f /opt/pvehub/data/auth.json && rc-service pvehub restart'`. Le mot de passe redevient celui de `APP_PASSWORD` ([section 7](#7-modifier-la-configuration)) |
 | Le conteneur ne démarre pas à l'installation | `pct start <ID> --debug` et regarde les dernières lignes |
 
 ## 9. Désinstaller
@@ -317,7 +318,14 @@ tailscale serve --https=8443 off                             # si tu avais publi
   double authentification sur ce compte GitHub.
 - Notifications : le contenu est chiffré de bout en bout entre ton serveur et ton téléphone (standard Web Push) ;
   Apple ou Google ne font que transporter un message illisible.
-- Accès protégé par mot de passe (session de 30 jours).
+- Accès protégé par mot de passe (session de 30 jours). Dans **Réglages → Sécurité** :
+  - les dernières connexions, réussies ou non, avec l'adresse (ou le compte Tailscale) et le type d'appareil ;
+  - **Changer le mot de passe** : il est enregistré haché dans `data/auth.json` et remplace `APP_PASSWORD` ;
+    les autres appareils sont déconnectés ;
+  - **Déconnecter les autres appareils** : utile si un téléphone est perdu.
+- Un mot de passe incorrect envoie une notification (au plus une toutes les 10 minutes).
+- Le cookie de session est réservé à HTTPS quand l'app est ouverte en HTTPS, et l'app refuse d'être affichée dans
+  le cadre d'un autre site.
 - Fait pour le réseau local. Depuis l'extérieur, passe par Tailscale ou un autre VPN, jamais par un port ouvert sur
   ta box.
 - L'API de Hermes donne accès à son terminal : garde sa clé secrète et ne l'expose pas sur Internet.

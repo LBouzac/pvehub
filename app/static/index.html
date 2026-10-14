@@ -404,7 +404,7 @@ function alertForm(title, msg, fields) {
     const m = document.createElement("div"); m.className = "modal center";
     m.innerHTML = `<form class="alert"><div class="ab"><h3>${title}</h3>${msg ? `<p class="mute">${msg}</p>` : ""}${fields.map(f => f.options
       ? `<select name="${f.name}" aria-label="${esc(f.ph || f.name)}">${f.options.map(o => `<option>${esc(o)}</option>`).join("")}</select>`
-      : `<input name="${f.name}" placeholder="${esc(f.ph)}" value="${esc(f.value || "")}" aria-label="${esc(f.ph)}">`).join("")}</div>
+      : `<input name="${f.name}" type="${f.type || "text"}" placeholder="${esc(f.ph)}" value="${esc(f.value || "")}" aria-label="${esc(f.ph)}">`).join("")}</div>
       <div class="abtns"><button type="button" data-a="0">Annuler</button><button>OK</button></div></form>`;
     const form = m.querySelector("form");
     form.onsubmit = e => { e.preventDefault(); const v = Object.fromEntries(new FormData(form)); m.remove(); res(v); };
@@ -945,6 +945,7 @@ function openFromHash() {
   history.replaceState(null, "", location.pathname);
   if (h === "maint") openMaint();
   else if (h === "report") openLatestReport();
+  else if (h === "security") openSettings();
   else if (h.startsWith("g=") && findGuest(h.slice(2))) { setView("guests"); openGuest(h.slice(2)); }
 }
 
@@ -1364,6 +1365,18 @@ async function copyText(t) {
   toast("📋 Copié");
 }
 
+// ---------- sécurité : connexions récentes, mot de passe, sessions
+function securityHtml() {
+  const a = S.auth;
+  if (!a) return `<div class="cell"><div class="body mute">Chargement…</div></div>`;
+  const ua = u => /iPhone|iPad/.test(u) ? "iPhone/iPad" : /Android/.test(u) ? "Android" : /Mac OS/.test(u) ? "Mac" : /Windows/.test(u) ? "Windows" : /Linux/.test(u) ? "Linux" : "Appareil inconnu";
+  const rows = a.log.slice(0, 8).map(l => `<div class="cell"><div class="body"><div class="t">${l.ok ? "✅ Connexion" : "⛔️ Mot de passe incorrect"}</div>
+      <div class="s">${esc(l.who || l.ip)} · ${esc(ua(l.ua))}</div></div><div class="v" style="font-size:14px">${when(l.t)}</div></div>`).join("");
+  return `${rows || `<div class="cell"><div class="body mute">Aucune connexion enregistrée</div></div>`}
+    <button class="cell tap act" id="chgPw"><div class="body">${a.enabled ? "Changer le mot de passe" : "Définir un mot de passe"}</div></button>
+    ${a.enabled ? `<button class="cell tap act danger" id="revoke"><div class="body">Déconnecter les autres appareils</div></button>` : ""}`;
+}
+
 // ---------- apparence
 const ACCENTS = [["blue", "Bleu"], ["indigo", "Indigo"], ["purple", "Violet"], ["pink", "Rose"], ["red", "Rouge"], ["orange", "Orange"], ["green", "Vert"], ["teal", "Turquoise"], ["mono", "Noir et blanc"]];
 const BGS = [["system", "Système"], ["tint", "Teinté"], ["contrast", "Contraste"]];
@@ -1395,11 +1408,15 @@ function openSettings() {
           : `<button class="cell tap act" id="chkUpd"><div class="body">${S.ver?.error ? esc(S.ver.error) : S.ver ? "À jour · Vérifier maintenant" : "Vérifier maintenant"}</div></button>`}
       </div>
       <div class="ftr">${S.ver?.checked_at ? `Dernière vérification : ${when(S.ver.checked_at)}. ` : ""}Vérification automatique une fois par semaine.${S.ver && !S.ver.can_update ? "<br>" + esc(S.ver.why_not) : ""}</div>
+      <div class="hdr">Sécurité</div>
+      <div class="group">${securityHtml()}</div>
+      <div class="ftr">Changer le mot de passe déconnecte aussi les autres appareils. Une notification arrive en cas de mot de passe incorrect.</div>
       <div class="hdr">Compte</div>
       <div class="group"><button class="cell tap act danger" id="logout"><div class="body">Se déconnecter</div></button></div></div>`;
   };
   draw();
   api("/api/remote").then(r => { S.remote = r; if (m.isConnected) draw(); }).catch(() => {});
+  api("/api/auth").then(r => { S.auth = r; if (m.isConnected) draw(); }).catch(() => {});
   pushState().then(() => { if (m.isConnected) draw(); });
   m.onchange = async e => {  // réglages des alertes (communs à tous les appareils)
     const k = e.target.dataset.alert; if (!k) return;
@@ -1422,6 +1439,21 @@ function openSettings() {
     }
     if (e.target.closest("#doUpd")) { m.remove(); return doUpdate(); }
     if (e.target.closest("#chkUpd")) { e.target.closest("#chkUpd").querySelector(".body").textContent = "Vérification…"; await checkVersion(true); return draw(); }
+    if (e.target.closest("#chgPw")) {
+      const v = await alertForm("Changer le mot de passe", "Au moins 10 caractères. Les autres appareils seront déconnectés.",
+        [...(S.auth?.enabled ? [{ name: "current", ph: "Mot de passe actuel", type: "password" }] : []),
+         { name: "new", ph: "Nouveau mot de passe", type: "password" }, { name: "again", ph: "Confirmer", type: "password" }]);
+      if (!v) return;
+      if (v.new !== v.again) return toast("❌ Les deux mots de passe ne correspondent pas");
+      try { await api("/api/auth/password", { body: { current: v.current || "", new: v.new } }); toast("✅ Mot de passe changé"); }
+      catch (err) { toast("❌ " + err.message, 5000); }
+      return;
+    }
+    if (e.target.closest("#revoke")) {
+      if (!await confirmBox("Déconnecter les autres appareils", "Tous les appareils devront se reconnecter, sauf celui-ci.", "Déconnecter", true)) return;
+      try { await api("/api/auth/revoke", { body: {} }); toast("✅ Autres appareils déconnectés"); } catch (err) { toast("❌ " + err.message); }
+      return;
+    }
     if (e.target.closest("#logout")) { await api("/api/logout", { body: {} }).catch(() => {}); m.remove(); return showLogin(); }
     const b = e.target.closest("[data-mode],[data-accent],[data-bg]"); if (!b || b.tagName !== "BUTTON") return;
     if (b.dataset.mode) t.mode = b.dataset.mode === "auto" ? undefined : b.dataset.mode;
