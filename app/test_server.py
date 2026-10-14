@@ -379,4 +379,32 @@ srv.restore_app(job, rem[0]["id"])
 create = [c for c in world["calls"] if c[0] == "POST" and c[1] == "/nodes/pve/lxc"][-1][2]
 assert create == {"vmid": 130, "ostemplate": BK["volid"], "restore": 1, "storage": "local-lvm"}, create   # ID d'origine libre
 assert "130" in srv.read_json(srv.INSTALLED_FILE, {}) and srv.r_store_removed({})["items"] == []
+# réponses de Hermes suivies par le serveur : enregistrées dans la conversation, notification si l'app est fermée
+import io, contextlib
+pushes = []
+srv.send_push = lambda *a: pushes.append(a) or 1
+srv.write_json(srv.CHATS_FILE, {"cafe0001": {"id": "cafe0001", "title": "t", "updated": 0, "messages": [
+    {"role": "user", "content": "Redémarre jellyfin"}, {"role": "assistant", "content": "", "typing": True, "runId": "run_x"}]}})
+def stream(*evs):
+    body = "".join(f"data: {_j.dumps(e)}\n\n" for e in evs).encode()
+    return contextlib.closing(io.BytesIO(body)) if False else io.BytesIO(body)
+srv._runs["run_x"] = {"events": [], "done": False, "conv": "cafe0001", "listeners": 0, "at": 0, "cond": srv.threading.Condition()}
+srv.pump_run("run_x", stream({"event": "tool.started", "tool": "terminal"}, {"event": "approval.request", "command": "pct reboot 103"},
+                             {"event": "approval.responded", "choice": "once"}, {"event": "message.delta", "delta": "C'est "},
+                             {"event": "run.completed", "output": "C'est fait **jellyfin** redémarré"}))
+m = srv.r_chat_get({"id": "cafe0001"})["messages"][1]
+assert m["content"] == "C'est fait **jellyfin** redémarré" and m["typing"] is False and m["tools"] == ["terminal"], m
+assert m["approvals"][0]["answer"] == "once" and srv._runs["run_x"]["done"]
+assert [p[0] for p in pushes] == ["🛡️ Hermes attend ton autorisation", "💬 Hermes a répondu"] and pushes[1][2] == "/#chat=cafe0001", pushes
+assert pushes[1][1] == "C'est fait jellyfin redémarré"
+# quelqu'un regarde : pas de notification ; Hermes coupe sans fin : réponse close proprement
+pushes.clear()
+srv._runs["run_y"] = {"events": [], "done": False, "conv": None, "listeners": 1, "at": 0, "cond": srv.threading.Condition()}
+srv.pump_run("run_y", stream({"event": "message.delta", "delta": "début"}))
+assert pushes == [] and srv._runs["run_y"]["events"][-1]["event"] == "run.interrupted"
+# un appareil en retard ne remplace pas une réponse terminée par sa version « en cours »
+srv.r_chat_save({"id": "cafe0001", "messages": [{"role": "user", "content": "Redémarre jellyfin"},
+                                                {"role": "assistant", "content": "", "typing": True, "runId": "run_x"}]})
+m = srv.r_chat_get({"id": "cafe0001"})["messages"][1]
+assert m["typing"] is False and m["content"].startswith("C'est fait"), m
 print("ok")

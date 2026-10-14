@@ -128,6 +128,12 @@ Chaque rapport du matin a sa propre conversation (☀️). **Demander à Hermes*
 l'événement joints : relis, modifie si besoin, puis envoie. Les conversations sont gardées sur le serveur
 (`data/chats.json`, les 100 plus récentes) : tu les retrouves sur tous tes appareils.
 
+**Réponses en arrière-plan** : c'est le serveur PVE Hub qui suit la réponse de Hermes. Tu peux fermer l'app ou
+changer de conversation pendant qu'il travaille : la réponse est enregistrée quand il a fini, et tu reçois une
+notification (« Hermes a répondu », ou « Hermes attend ton autorisation » s'il lui faut ton accord). En rouvrant
+l'app, la réponse reprend en direct là où elle en est. Si PVE Hub redémarre pendant une réponse, celle-ci est perdue :
+repose la question.
+
 ## 4. Mettre à jour
 
 **Depuis l'app** (section Commandes activée) : quand une nouvelle version existe, un bandeau apparaît sur l'onglet

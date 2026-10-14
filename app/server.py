@@ -464,7 +464,7 @@ class Handler(BaseHTTPRequestHandler):
             route = ROUTES.get((method, path))
             if not route:
                 raise ApiError(404, "Route inconnue")
-            if path == "/api/chat":
+            if path in ("/api/chat", "/api/chat/stream"):
                 return route(self)
             data = self.qs() if method == "GET" else self.body()
             self.send_json(route(data))
@@ -511,7 +511,7 @@ class Handler(BaseHTTPRequestHandler):
         return {"enabled": auth_enabled(), "custom": bool(st.get("pw")),
                 "sessions": sorted(ses, key=lambda x: (not x["current"], -x["seen"]))}
 
-    # -- chat (stream SSE)
+    # -- chat : la réponse est suivie par le serveur (l'app peut se fermer), l'app s'y abonne et peut s'y raccrocher
     def chat(self):
         if not hermes_on():
             raise ApiError(503, "Hermes est désactivé dans Réglages" if HERMES_URL else "Hermes n'est pas configuré (HERMES_URL)")
@@ -522,12 +522,14 @@ class Handler(BaseHTTPRequestHandler):
                 msgs.append({"role": m["role"], "content": m["content"][:20000]})
         if not msgs:
             raise ApiError(400, "Message vide")
+        if msgs[-1]["role"] != "user":
+            raise ApiError(400, "Le dernier message doit venir de toi")
+        conv = str(d.get("conv") or "")
+        conv = conv if RE_CHAT.match(conv) else None
         try:
             summary = cluster_summary()
         except ApiError as e:
             summary = f"(état indisponible : {e.msg})"
-        if msgs[-1]["role"] != "user":
-            raise ApiError(400, "Le dernier message doit venir de toi")
         system = SYSTEM_PROMPT.format(now=local_now().strftime("%d/%m/%Y %H:%M"), summary=summary)
         # API « runs » : seule à exposer les demandes d'autorisation de Hermes (approval.request)
         run = hermes("POST", "/v1/runs", {"input": msgs[-1]["content"], "instructions": system,
@@ -536,6 +538,18 @@ class Handler(BaseHTTPRequestHandler):
         if not RE_RUN.match(run_id):
             raise ApiError(502, "Hermes : réponse inattendue")
         upstream = hermes("GET", f"/v1/runs/{run_id}/events", stream=True)
+        now = time.time()
+        for k in [k for k, r in list(_runs.items()) if r["done"] and now - r["at"] > 3600]:
+            del _runs[k]
+        _runs[run_id] = {"events": [], "done": False, "conv": conv, "listeners": 0, "at": now, "cond": threading.Condition()}
+        threading.Thread(target=pump_run, args=(run_id, upstream), daemon=True).start()
+        return self.send_json({"run_id": run_id})
+
+    def chat_stream(self):
+        """Événements d'une réponse en cours ou terminée, depuis le début ; « : ping » toutes les 3 s (détecte l'app fermée)."""
+        run = _runs.get(self.qs().get("run", ""))
+        if not run:
+            raise ApiError(404, "Réponse introuvable (PVE Hub a peut-être redémarré)")
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-store")
@@ -543,17 +557,121 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Connection", "close")
         self.end_headers()
         self.close_connection = True
+        idx, cond = 0, run["cond"]
+        with cond:
+            run["listeners"] += 1
+        try:
+            while True:
+                with cond:
+                    if idx >= len(run["events"]) and not run["done"]:
+                        cond.wait(3)
+                    evs, done = run["events"][idx:], run["done"]
+                for e in evs:
+                    self.wfile.write(f"data: {json.dumps(e)}\n\n".encode())
+                idx += len(evs)
+                if not evs:
+                    self.wfile.write(b": ping\n\n")
+                self.wfile.flush()
+                if done and idx >= len(run["events"]):
+                    self.wfile.write(b'data: {"event": "pvehub.end"}\n\n')
+                    self.wfile.flush()
+                    break
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+        finally:
+            with cond:
+                run["listeners"] -= 1
+
+
+_runs = {}  # run_id -> {events, done, conv, listeners, at, cond} : réponses de Hermes suivies par le serveur
+
+
+def apply_event(reply, ev):
+    """Même logique que l'app : construit la réponse à partir des événements de Hermes. Retourne True à la fin."""
+    e = ev.get("event")
+    if e == "message.delta":
+        reply["content"] += ev.get("delta") or ""
+    elif e == "tool.started" and ev.get("tool") and ev["tool"] not in reply["tools"]:
+        reply["tools"].append(ev["tool"])
+    elif e == "approval.request":
+        reply["approvals"].append({k: ev.get(k) for k in ("command", "description", "choices", "request_id")})
+    elif e == "approval.responded":
+        p = next((a for a in reply["approvals"] if not a.get("answer")), None)
+        if p:
+            p["answer"] = ev.get("choice")
+    elif e == "run.completed":
+        if ev.get("output"):
+            reply["content"] = ev["output"]
+        return True
+    elif e in ("run.failed", "run.interrupted"):
+        reply["content"] += ("\n\n" if reply["content"] else "") + "⚠️ " + str(ev.get("error") or "Hermes a échoué")
+        return True
+    elif e == "run.cancelled":
+        reply["content"] += ("\n\n" if reply["content"] else "") + "_(annulé)_"
+        return True
+    return False
+
+
+def pump_run(run_id, upstream):
+    """Lit la réponse de Hermes jusqu'au bout, même si plus personne n'écoute ; à la fin, l'enregistre et notifie."""
+    run, reply = _runs[run_id], {"role": "assistant", "content": "", "tools": [], "approvals": [], "runId": run_id}
+    url = f"/#chat={run['conv']}" if run["conv"] else "/"
+
+    def add(ev):
+        with run["cond"]:
+            run["events"].append(ev)
+            run["cond"].notify_all()
+            alone = run["listeners"] == 0
+        end = apply_event(reply, ev)
+        if ev.get("event") == "approval.request" and alone:
+            send_push("🛡️ Hermes attend ton autorisation", str(ev.get("command") or ev.get("description") or "")[:140], url, f"chat-{run_id}")
+        return end
+    try:
         with upstream:
-            try:
-                self.wfile.write(f'data: {{"event": "pvehub.run", "run_id": "{run_id}"}}\n\n'.encode())
-                self.wfile.flush()
-                for line in upstream:
-                    self.wfile.write(line)
-                    if line in (b"\n", b"\r\n"):
-                        self.wfile.flush()
-                self.wfile.flush()
-            except (BrokenPipeError, ConnectionResetError):
-                pass
+            data = []
+            for raw in upstream:
+                line = raw.decode("utf-8", "replace").rstrip("\r\n")
+                if line.startswith("data:"):
+                    data.append(line[5:].lstrip())
+                elif not line and data:
+                    try:
+                        ev = json.loads("\n".join(data))
+                    except ValueError:
+                        ev = None
+                    data = []
+                    if isinstance(ev, dict) and add(ev):
+                        break
+            else:
+                if not any(e.get("event", "").startswith("run.") for e in run["events"]):
+                    add({"event": "run.interrupted", "error": "Hermes a coupé la connexion"})
+    except Exception as e:  # noqa: BLE001 — réseau coupé, Hermes redémarré… : la réponse est close proprement
+        add({"event": "run.interrupted", "error": f"Connexion à Hermes perdue ({type(e).__name__})"})
+    finally:
+        with run["cond"]:
+            run["done"], run["at"] = True, time.time()
+            run["cond"].notify_all()
+            alone = run["listeners"] == 0
+        if run["conv"]:
+            store_reply(run["conv"], reply)
+        if alone:
+            first = re.sub(r"[*_#`>]|```pvehub[\s\S]*?```", "", reply["content"]).strip().split("\n")[0][:140]
+            send_push("💬 Hermes a répondu", first or "Réponse prête", url, f"chat-{run_id}")
+
+
+def store_reply(conv, reply):
+    """Enregistre la réponse dans la conversation (à la place du message « en cours » de l'app, sinon à la fin)."""
+    with _chats_lock:
+        chats = read_json(CHATS_FILE, {})
+        c = chats.get(conv)
+        if not c:
+            return
+        i = next((i for i, m in enumerate(c["messages"]) if m.get("runId") == reply["runId"]), None)
+        if i is None:
+            c["messages"].append(reply)
+        else:
+            c["messages"][i] = {**c["messages"][i], **reply, "typing": False}
+        c["updated"] = int(time.time())
+        write_json(CHATS_FILE, chats)
 
 
 # ---------------------------------------------------------------- routes
@@ -971,6 +1089,9 @@ def r_chat_save(d):
     with _chats_lock:
         chats = read_json(CHATS_FILE, {})
         old = chats.get(cid, {})
+        # une réponse terminée par le serveur ne redevient jamais « en cours » à cause d'un appareil en retard
+        done = {m["runId"]: m for m in old.get("messages", []) if m.get("runId") and not m.get("typing")}
+        msgs = [done.get(m.get("runId"), m) if m.get("typing") else m for m in msgs]
         chats[cid] = {"id": cid, "title": title or old.get("title") or "Conversation", "created": old.get("created", int(time.time())),
                       "updated": int(time.time()), "report": d.get("report") or old.get("report"), "messages": msgs}
         # 100 conversations au plus : les plus anciennes partent
@@ -2492,6 +2613,7 @@ ROUTES = {
     ("GET", "/api/task"): r_task,
     ("GET", "/api/tasks"): r_tasks,
     ("POST", "/api/chat"): Handler.chat,
+    ("GET", "/api/chat/stream"): Handler.chat_stream,
     ("POST", "/api/chat/approval"): r_approval,
     ("POST", "/api/exec"): r_exec,
     ("GET", "/api/maint/backups"): r_maint_backups,
