@@ -98,7 +98,9 @@ retenu par Hermes lui-même : pour l'annuler, modifie sa configuration.
 
 **Conversations** : dans l'onglet Hermes, l'icône en haut à gauche ouvre l'historique (recherche, reprendre une
 conversation, **Modifier** pour en supprimer) ; l'icône crayon en haut à droite démarre une nouvelle conversation.
-Chaque rapport du matin a sa propre conversation (☀️). Les conversations sont gardées sur le serveur
+Chaque rapport du matin a sa propre conversation (☀️). **Demander à Hermes** (sur la fiche d'une machine, et sur les alertes ou
+échecs du Journal) ouvre une nouvelle conversation avec la question prête et l'état de la machine ou le détail de
+l'événement joints : relis, modifie si besoin, puis envoie. Les conversations sont gardées sur le serveur
 (`data/chats.json`, les 100 plus récentes) : tu les retrouves sur tous tes appareils.
 
 ## 4. Mettre à jour

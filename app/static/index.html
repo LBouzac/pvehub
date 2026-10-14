@@ -592,6 +592,7 @@ function renderGuest() {
       <button class="rb" data-p="reboot" ${on ? "" : "disabled"}>${I.reboot}<span style="color:var(--label)">Redémarrer</span></button>
       <button class="kill" data-p="stop" ${on ? "" : "disabled"}>${I.kill}<span style="color:var(--label)">Forcer</span></button>
     </div>
+    ${S.ov?.hermes ? `<div class="group" style="margin-top:14px"><button class="cell icon tap act" id="askGuest">${icoBox(I.chat, "indigo")}<div class="body">Demander à Hermes</div>${I.chev}</button></div>` : ""}
     <div class="hdr">Ressources</div><div class="group">
       <div class="cell icon">${icoBox(I.cpu, "orange")}<div class="body"><div class="row"><span class="grow">Processeur</span><span class="mute">${on ? cpu.toFixed(0) + " %" : "–"} · ${g.maxcpu} cœur${g.maxcpu > 1 ? "s" : ""}</span></div>${bar(on ? cpu : 0)}</div></div>
       <div class="cell icon">${icoBox(I.mem, "blue")}<div class="body"><div class="row"><span class="grow">Mémoire</span><span class="mute">${on ? fb(g.mem) : "–"} / ${fb(g.maxmem)}</span></div>${bar(on ? pct(g.mem, g.maxmem) : 0)}</div></div>
@@ -644,6 +645,13 @@ async function loadGuestExtras() {
     .finally(() => { if ($("#bks")) $("#bks").innerHTML = bksHtml(); });
 }
 $("#sheet").addEventListener("click", async e => {
+  if (e.target.closest("#askGuest")) {
+    const g = findGuest(S.guest); if (!g) return;
+    const on = g.status === "running", label = `${kind(g.type)} ${g.vmid} « ${g.name || "sans nom"} »`;
+    return askHermes(`Regarde la ${label} : est-ce que tout va bien ? Si quelque chose cloche, explique-moi pourquoi et propose une solution.`,
+      `État actuel vu par PVE Hub : ${label} sur le nœud ${g.node}, ${(STATUS[g.status] || g.status).toLowerCase()}${on ? " depuis " + up(g.uptime) : ""}. ` +
+      `CPU ${on ? ((g.cpu || 0) * 100).toFixed(0) + " %" : "–"} sur ${g.maxcpu} cœur(s), mémoire ${on ? fb(g.mem) : "–"} / ${fb(g.maxmem)}, disque ${g.disk ? fb(g.disk) : "–"} / ${fb(g.maxdisk)}.`);
+  }
   const g = findGuest(S.guest); if (!g) return;
   const base = { node: g.node, type: g.type, vmid: g.vmid };
   const p = e.target.closest("[data-p]"), sn = e.target.closest("[data-snap]"), vb = e.target.closest("[data-vol]"), nw = e.target.closest("[data-new]");
@@ -1443,10 +1451,11 @@ function renderJournal() {
     if (d !== day) { h += `${day ? "</div>" : ""}<div class="hdr">${esc(d)}</div><div class="group">`; day = d; }
     const [ico, col] = e.kind === "login" && !e.ok ? [I.shield, "red"] : J_KIND[e.kind] || [I.bell, "gray"];
     const sub = [e.body, e.ua ? uaName(e.ua) : ""].filter(Boolean).join(" · ");
-    const tag = e.url ? "button" : "div";
-    h += `<${tag} class="cell icon ${e.url ? "tap" : ""}" ${e.url ? `data-jurl="${esc(e.url)}"` : ""}>${icoBox(ico, col)}<div class="body"><div class="t">${esc(e.title)}</div>
-      ${sub ? `<div class="s" style="line-height:1.35">${esc(sub)}</div>` : ""}</div>
-      <div class="v" style="font-size:14px">${new Date(e.ts * 1000).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</div>${e.url ? I.chev : ""}</${tag}>`;
+    const ask = S.ov?.hermes && (e.kind === "alert" || /échec/.test(e.title));
+    h += `<div class="cell icon ${e.url ? "tap" : ""}" ${e.url ? `data-jurl="${esc(e.url)}" role="button" tabindex="0"` : ""}>${icoBox(ico, col)}<div class="body"><div class="t">${esc(e.title)}</div>
+      ${sub ? `<div class="s" style="line-height:1.35">${esc(sub)}</div>` : ""}
+      ${ask ? `<button class="chip" data-ask="${S.jEv.indexOf(e)}" style="margin-top:8px;color:var(--accent)">Demander à Hermes</button>` : ""}</div>
+      <div class="v" style="font-size:14px">${new Date(e.ts * 1000).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</div>${e.url ? I.chev : ""}</div>`;
   }
   if (day) h += "</div>";
   h += `<div class="ftr">Les 300 derniers événements sont gardés sur le serveur.</div><div style="height:calc(40px + env(safe-area-inset-bottom))"></div>`;
@@ -1456,6 +1465,12 @@ $("#journal").addEventListener("scroll", () => $("#jnav")?.classList.toggle("scr
 $("#journal").addEventListener("click", e => {
   const fb = e.target.closest("[data-jf]"); if (fb) { S.jFilter = fb.dataset.jf; return renderJournal(); }
   if (e.target.closest("#jRefresh")) return loadJournal();
+  const ab = e.target.closest("[data-ask]");
+  if (ab) {
+    const ev = S.jEv[+ab.dataset.ask], at = new Date(ev.ts * 1000).toLocaleString("fr-FR", { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
+    return askHermes(`${ev.title} (${at}). Regarde pourquoi et dis-moi quoi faire.`,
+      `Événement du journal de PVE Hub, ${at} : « ${ev.title} »${ev.body ? ` — ${ev.body.replace(/[.\s]+$/, "")}` : ""}.`);
+  }
   const u = e.target.closest("[data-jurl]");
   if (u) { closeJournal(); history.replaceState(null, "", u.dataset.jurl); openFromHash(); }
 });
@@ -1610,7 +1625,7 @@ function renderChat() {
   if (!S.ov?.hermes) { $("#chat").innerHTML = `<div class="empty">Hermes n'est pas configuré.<br>Renseigne HERMES_URL et HERMES_KEY dans /opt/pvehub/.env.</div>`; $("#composer").classList.add("hide"); return; }
   $("#composer").classList.remove("hide");
   $("#chatTitle").textContent = S.chat.length ? S.conv.title || "" : "";
-  $("#chat").innerHTML = S.chat.length ? S.chat.map(msgHtml).join("") + `<button class="chip" style="align-self:center;margin-top:16px;font-family:var(--font);color:var(--accent)" id="clearChat">Nouvelle conversation</button>`
+  $("#chat").innerHTML = S.chat.length ? S.chat.map(msgHtml).join("") + (S.chat.some(m => m.role !== "note") ? `<button class="chip" style="align-self:center;margin-top:16px;font-family:var(--font);color:var(--accent)" id="clearChat">Nouvelle conversation</button>` : "")
     : `<div class="empty">Demande à Hermes comment va ton serveur, ou ce qu'il ferait.<br><br>
       <button class="chip" data-ex="Comment va mon serveur ?">Comment va mon serveur ?</button><button class="chip" data-ex="Quelle machine consomme le plus ?">Quelle machine consomme le plus ?</button></div>`;
 }
@@ -1646,6 +1661,16 @@ async function openConv(id, quiet) {
   if (S.busy) return toast("Attends la fin de la réponse de Hermes");
   try { const c = await api("/api/chats/get?" + qs({ id })); setConv(c); if (!quiet) setView("chat"); }
   catch (e) { if (!quiet) toast("❌ " + e.message); }
+}
+// Ouvre une nouvelle conversation avec la question prête (modifiable) ; le contexte part avec, sans encombrer le chat
+function askHermes(question, context) {
+  if (S.busy) return toast("Attends la fin de la réponse de Hermes");
+  if (S.guest) closeGuest();
+  if (S.jOpen) closeJournal();
+  setConv({ id: null, title: question.replace(/\s+/g, " ").slice(0, 60), messages: [] });
+  if (context) addNote(context);
+  setView("chat");
+  const p = $("#prompt"); p.value = question; p.dispatchEvent(new Event("input")); p.focus();
 }
 function newConv() {
   if (S.busy) return toast("Attends la fin de la réponse de Hermes");
