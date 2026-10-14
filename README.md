@@ -376,5 +376,7 @@ MIT — voir [LICENSE](LICENSE).
 
 Icône « réglages » adaptée de [Feather Icons](https://feathericons.com) (MIT, © Cole Bemis).
 
+Développé avec l'aide de Claude (Anthropic).
+
 PVE Hub est un projet indépendant, sans lien avec Proxmox Server Solutions GmbH ni avec Nous Research.
 Proxmox est une marque déposée de Proxmox Server Solutions GmbH.
