@@ -72,6 +72,11 @@ Conseil : réserve cette IP dans ta box (bail DHCP fixe) pour que l'adresse de l
 
 ## 3. Brancher Hermes
 
+Hermes est facultatif : sans lui (adresse laissée vide à l'installation), son onglet et ses boutons n'apparaissent
+pas. S'il est branché, tu peux aussi le couper dans **Réglages → Assistant**, pour tous tes appareils ; le rapport
+du matin devient alors factuel et tes conversations sont gardées. Pour utiliser une autre IA (Claude, Mistral, un
+modèle local…), choisis-la comme modèle dans la configuration de Hermes : PVE Hub n'a rien à changer.
+
 1. Sur la machine où tourne Hermes, dans `~/.hermes/.env` :
    ```bash
    API_SERVER_ENABLED=true

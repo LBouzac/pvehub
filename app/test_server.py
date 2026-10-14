@@ -241,4 +241,14 @@ for bad in ({"id": "../etc", "messages": []}, {"id": "aaaa1111", "messages": "x"
         pass
 srv.r_chat_delete({"id": "aaaa1111"})
 assert [x["id"] for x in srv.r_chats({})["chats"]] == ["bbbb2222"]
+# Hermes désactivable : l'onglet disparaît et les appels sont refusés
+srv.APP_FILE, srv.HERMES_URL = os.path.join(srv.DATA_DIR, "app.json"), "http://h:8642"
+assert srv.hermes_on()
+assert srv.r_app_settings({"hermes": False})["hermes"] is False and not srv.hermes_on()
+try:
+    srv.hermes("GET", "/x"); raise AssertionError("Hermes appelé alors que désactivé")
+except srv.ApiError as e:
+    assert "désactivé" in e.msg
+srv.r_app_settings({"hermes": True}); srv.HERMES_URL = ""
+assert not srv.hermes_on()                                        # pas configuré : jamais actif
 print("ok")

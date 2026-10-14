@@ -116,9 +116,26 @@ def pve(method, path, params=None, timeout=30):
         raise ApiError(502, f"Proxmox injoignable : {getattr(e, 'reason', e)}")
 
 
+APP_FILE = os.path.join(DATA_DIR, "app.json")  # réglages de l'app communs à tous les appareils
+
+
+def hermes_on():
+    """Hermes configuré (HERMES_URL) et non désactivé dans Réglages."""
+    return bool(HERMES_URL) and read_json(APP_FILE, {}).get("hermes", True)
+
+
+def r_app_settings(d):
+    with _apps_lock:
+        st = read_json(APP_FILE, {})
+        if "hermes" in d:
+            st["hermes"] = bool(d["hermes"])
+        write_json(APP_FILE, st)
+    return {"ok": True, "hermes": hermes_on()}
+
+
 def hermes(method, path, body=None, stream=False, timeout=30):
-    if not HERMES_URL:
-        raise ApiError(503, "Hermes n'est pas configuré (HERMES_URL)")
+    if not hermes_on():
+        raise ApiError(503, "Hermes est désactivé dans Réglages" if HERMES_URL else "Hermes n'est pas configuré (HERMES_URL)")
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(f"{HERMES_URL}{path}", data=data, method=method)
     req.add_header("Authorization", f"Bearer {HERMES_KEY}")
@@ -493,8 +510,8 @@ class Handler(BaseHTTPRequestHandler):
 
     # -- chat (stream SSE)
     def chat(self):
-        if not HERMES_URL:
-            raise ApiError(503, "Hermes n'est pas configuré (HERMES_URL)")
+        if not hermes_on():
+            raise ApiError(503, "Hermes est désactivé dans Réglages" if HERMES_URL else "Hermes n'est pas configuré (HERMES_URL)")
         d = self.body()
         msgs = []
         for m in (d.get("messages") or [])[-40:]:
@@ -542,7 +559,8 @@ def r_overview(_):
     nodes = pve("GET", "/nodes") or []
     guests = pve("GET", "/cluster/resources", {"type": "vm"}) or []
     storage = pve("GET", "/cluster/resources", {"type": "storage"}) or []
-    return {"nodes": nodes, "guests": guests, "storage": storage, "hermes": bool(HERMES_URL), "exec": EXEC_ENABLED}
+    return {"nodes": nodes, "guests": guests, "storage": storage, "hermes": hermes_on(), "hermes_configured": bool(HERMES_URL),
+            "exec": EXEC_ENABLED}
 
 
 def r_exec(d):
@@ -1568,7 +1586,7 @@ def generate_report(push=True):
     """Rédige le rapport (Hermes, sinon version factuelle), l'enregistre et l'envoie en notification."""
     facts, issues = report_facts()
     text, by = None, "hermes"
-    if HERMES_URL:
+    if hermes_on():
         try:
             r = hermes("POST", "/v1/chat/completions", {"model": "hermes-agent", "messages": [
                 {"role": "system", "content": REPORT_PROMPT + "\n\nÉtat du serveur :\n" + facts},
@@ -2046,6 +2064,7 @@ def r_tasks(q):
 ROUTES = {
     ("POST", "/api/store/uninstall"): r_store_uninstall,
     ("GET", "/api/events"): r_events,
+    ("POST", "/api/settings"): r_app_settings,
     ("GET", "/api/chats"): r_chats,
     ("GET", "/api/chats/get"): r_chat_get,
     ("POST", "/api/chats/save"): r_chat_save,

@@ -466,6 +466,11 @@ const legend = (items, right = "dernière heure") => `<div class="legend">${item
 
 // ---------- navigation
 const TITLES = { dash: "Serveur", guests: "Machines", apps: "Apps", exec: "Commandes", chat: "Hermes" };
+// Hermes absent ou désactivé : son onglet disparaît (les boutons « Demander à Hermes » suivent S.ov.hermes)
+function applyHermes() {
+  $(".tabbar [data-v=chat]").classList.toggle("hide", !S.ov?.hermes);
+  if (!S.ov?.hermes && S.view === "chat") setView("dash");
+}
 function setView(v) {
   S.view = v;
   document.querySelectorAll(".tabbar button").forEach(b => b.classList.toggle("on", b.dataset.v === v));
@@ -1496,6 +1501,11 @@ function openSettings() {
       <div class="hdr">Notifications</div>
       <div class="group">${notifHtml()}</div>
       ${notifFooter()}
+      <div class="hdr">Assistant</div>
+      <div class="group"><label class="cell"><div class="body"><div class="t">Hermes</div><div class="s">${S.ov?.hermes_configured ? "Onglet, « Demander à Hermes », rapport rédigé" : "Non configuré"}</div></div>
+        <span class="sw"><input type="checkbox" data-app="hermes" aria-label="Hermes" ${S.ov?.hermes ? "checked" : ""} ${S.ov?.hermes_configured ? "" : "disabled"}><span></span></span></label></div>
+      <div class="ftr">${S.ov?.hermes_configured ? "Désactivé, Hermes disparaît de l'app sur tous tes appareils et le rapport du matin devient factuel. Tes conversations sont gardées."
+        : "Pour brancher Hermes, renseigne HERMES_URL et HERMES_KEY (section 3 du README)."}</div>
       <div class="hdr">Accès à distance</div>
       <div class="group">${remoteHtml()}</div>
       <div class="ftr">${S.remote?.state === "Running" ? "Depuis l'extérieur : l'app Tailscale doit être connectée sur ton téléphone, avec le même compte."
@@ -1517,6 +1527,11 @@ function openSettings() {
   api("/api/auth").then(r => { S.auth = r; if (m.isConnected) draw(); }).catch(() => {});
   pushState().then(() => { if (m.isConnected) draw(); });
   m.onchange = async e => {  // réglages des alertes (communs à tous les appareils)
+    if (e.target.dataset.app) {
+      try { S.ov.hermes = (await api("/api/settings", { body: { [e.target.dataset.app]: e.target.checked } })).hermes; }
+      catch (err) { toast("❌ " + err.message); }
+      applyHermes(); return draw();
+    }
     const k = e.target.dataset.alert; if (!k) return;
     const v = e.target.type === "checkbox" ? e.target.checked : k === "report_time" ? e.target.value : +e.target.value;
     if (k === "report_time" && !v) return;
@@ -1811,7 +1826,7 @@ async function send() {
 let timer;
 async function refresh() {
   try {
-    S.ov = await api("/api/overview");
+    S.ov = await api("/api/overview"); applyHermes();
     $("#live")?.classList.remove("off"); $("#live") && ($("#live").lastChild.textContent = "en direct");
     if (S.view !== "chat" && S.view !== "apps") render();
     if (S.view === "apps" && Date.now() - S.appsAt > 30000) loadApps();
@@ -1839,7 +1854,7 @@ $("#loginForm").onsubmit = async e => {
 async function start() {
   try { S.ov = await api("/api/overview"); } catch (e) { if (e.message === "Non connecté") return; }
   $("#login").classList.add("hide"); $("#app").classList.remove("hide");
-  setView(S.view); loop();
+  applyHermes(); setView(S.view); loop();
   if ("serviceWorker" in navigator && window.isSecureContext) navigator.serviceWorker.register("/sw.js").catch(() => {});
   await initChats();
   openFromHash(); addEventListener("hashchange", openFromHash);
