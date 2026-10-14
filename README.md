@@ -2,6 +2,21 @@
 
 Petite app web pour piloter ton Proxmox depuis le téléphone, avec l'agent IA Hermes intégré.
 
+<p align="center">
+  <img src="docs/screenshots/1_serveur.png" width="200" alt="Serveur">
+  <img src="docs/screenshots/2_machines.png" width="200" alt="Machines">
+  <img src="docs/screenshots/3_apps.png" width="200" alt="Apps">
+</p>
+<p align="center">
+  <img src="docs/screenshots/4_hermes.png" width="200" alt="Hermes">
+  <img src="docs/screenshots/5_store.png" width="200" alt="Store">
+  <img src="docs/screenshots/6_journal.png" width="200" alt="Journal">
+</p>
+<p align="center">
+  <img src="docs/screenshots/7_ordinateur.png" width="640" alt="Version ordinateur">
+</p>
+<p align="center"><sub>Serveur · Machines · Apps · Hermes (thème sombre) · Store · Journal · version ordinateur — données de démonstration</sub></p>
+
 - **Serveur** : CPU, RAM, disque, stockage, graphique de la dernière heure
 - **Machines** (VM et conteneurs) : démarrer, éteindre, redémarrer, forcer l'arrêt, snapshots, sauvegardes
 - **Apps** : tes services web (Home Assistant, Jellyfin…) en grille d'icônes, détectés automatiquement, avec un point
