@@ -18,7 +18,7 @@ Petite app web pour piloter ton Proxmox depuis le téléphone, avec l'agent IA H
 <p align="center"><sub>Serveur · Machines · Apps · Hermes (thème sombre) · Store · Journal · version ordinateur — données de démonstration</sub></p>
 
 - **Serveur** : CPU, RAM, disque, stockage, graphique de la dernière heure
-- **Machines** (VM et conteneurs) : démarrer, éteindre, redémarrer, forcer l'arrêt, snapshots, sauvegardes
+- **Machines** (VM et conteneurs) : démarrer, éteindre, redémarrer, forcer l'arrêt, snapshots, sauvegardes, démarrage automatique avec le serveur
 - **Apps** : tes services web (Home Assistant, Jellyfin…) en grille d'icônes, détectés automatiquement, avec un point
   vert s'ils répondent ; renommer, changer l'adresse, masquer, ajouter tes propres liens
 - **Store** : installer de nouvelles apps — environ 600 scripts de la communauté (Home Assistant, Jellyfin, Pi-hole…)

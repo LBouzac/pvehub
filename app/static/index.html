@@ -578,9 +578,9 @@ $("#guestList").onclick = e => { const it = e.target.closest("[data-id]"); if (i
 
 // ---------- détail machine
 const findGuest = id => S.ov?.guests.find(g => g.id === id);
-let guestRrd = [], guestSnaps = null, guestBk = null;
+let guestRrd = [], guestSnaps = null, guestBk = null, guestCfg = null;
 function openGuest(id) {
-  S.guest = id; guestRrd = []; guestSnaps = guestBk = null;
+  S.guest = id; guestRrd = []; guestSnaps = guestBk = guestCfg = null;
   $("#sheet").scrollTop = 0; $("#sheet").classList.add("open"); history.pushState({ g: id }, "");
   renderGuest(); loadGuestExtras();
 }
@@ -612,17 +612,32 @@ function renderGuest() {
       <div class="chartbox">${legend([["--orange", "CPU"], ["--blue", "Mémoire"]])}<canvas id="cvUse"></canvas></div>
       <div class="chartbox" style="padding-top:0">${legend([["--green", "Entrant"], ["--orange", "Sortant"]], "")}<canvas id="cvNet"></canvas></div>
     </div>
-    <div class="hdr" style="margin-top:22px"></div><div class="group">
-      ${S.ov.exec ? `<button class="cell icon tap" id="gExec">${icoBox(I.term, "gray")}<div class="body t">Lancer une commande</div>${I.chev}</button>` : ""}
-    </div>
+    <div class="hdr">Options</div><div class="group" id="gopts">${optsHtml()}</div>
+    <div class="ftr">Après une coupure de courant ou un redémarrage du serveur, les machines cochées repartent toutes seules.</div>
     <div class="hdr">Snapshots</div><div class="group" id="snaps">${snapsHtml()}</div>
     <div class="hdr">Sauvegardes</div><div class="group" id="bks">${bksHtml()}</div>
     <div style="height:calc(40px + env(safe-area-inset-bottom))"></div>`;
   $("#sheet").scrollTop = sc;
   drawGuestCharts();
-  $("#gExec") && ($("#gExec").onclick = () => { history.back(); S.execTarget = JSON.stringify({ type: g.type, node: g.node, vmid: g.vmid }); setView("exec"); $("#cmd")?.focus(); });
 }
 $("#sheet").addEventListener("scroll", () => $("#gnav")?.classList.toggle("scrolled", $("#sheet").scrollTop > 30), { passive: true });
+$("#sheet").addEventListener("change", async e => {
+  if (!e.target.matches("[data-onboot]")) return;
+  const g = findGuest(S.guest), t = e.target; if (!g) return;
+  t.disabled = true;
+  try {
+    await api("/api/guest/config", { body: { node: g.node, type: g.type, vmid: g.vmid, onboot: t.checked } });
+    (guestCfg.config ||= {}).onboot = t.checked ? 1 : 0;
+    toast(t.checked ? "✅ Démarrera avec le serveur" : "Ne démarrera plus avec le serveur");
+  } catch (err) { t.checked = !t.checked; toast("❌ " + err.message); }
+  t.disabled = false;
+});
+function optsHtml() {
+  const on = guestCfg?.config?.onboot == 1;
+  return `<label class="cell icon">${icoBox(I.power, "green")}<div class="body">Démarrer avec le serveur</div>
+      <span class="sw"><input type="checkbox" data-onboot aria-label="Démarrer avec le serveur" ${on ? "checked" : ""} ${guestCfg?.config ? "" : "disabled"}><span></span></span></label>
+    ${S.ov.exec ? `<button class="cell icon tap" id="gExec">${icoBox(I.term, "gray")}<div class="body t">Lancer une commande</div>${I.chev}</button>` : ""}`;
+}
 function snapsHtml() {
   const add = `<button class="cell icon tap act" data-new="snap">${icoBox(I.snap, "blue")}<div class="body">Créer un snapshot</div></button>`;
   if (!guestSnaps) return `<div class="cell"><div class="body mute">Chargement…</div></div>`;
@@ -646,12 +661,17 @@ async function loadGuestExtras() {
   const g = findGuest(S.guest); if (!g) return;
   const a = { node: g.node, type: g.type, vmid: g.vmid };
   api("/api/rrd?" + qs(a)).then(r => { guestRrd = r.data; drawGuestCharts(); }).catch(() => {});
+  api("/api/guest?" + qs(a)).then(r => { guestCfg = r; if ($("#gopts")) $("#gopts").innerHTML = optsHtml(); }).catch(() => {});
   api("/api/snapshots?" + qs(a)).then(r => { guestSnaps = r.items; }).catch(e => { guestSnaps = { error: e.message }; })
     .finally(() => { if ($("#snaps")) $("#snaps").innerHTML = snapsHtml(); });
   api("/api/backups?" + qs(a)).then(r => { guestBk = r; }).catch(e => { guestBk = { error: e.message }; })
     .finally(() => { if ($("#bks")) $("#bks").innerHTML = bksHtml(); });
 }
 $("#sheet").addEventListener("click", async e => {
+  if (e.target.closest("#gExec")) {
+    const g = findGuest(S.guest); if (!g) return;
+    history.back(); S.execTarget = JSON.stringify({ type: g.type, node: g.node, vmid: g.vmid }); setView("exec"); $("#cmd")?.focus(); return;
+  }
   if (e.target.closest("#askGuest")) {
     const g = findGuest(S.guest); if (!g) return;
     const on = g.status === "running", label = `${kind(g.type)} ${g.vmid} « ${g.name || "sans nom"} »`;

@@ -2044,6 +2044,15 @@ def r_guest(q):
     return {"status": status, "config": {k: config[k] for k in keep if k in config}}
 
 
+def r_guest_config(d):
+    """Réglages simples d'une machine : démarrage avec le serveur (onboot)."""
+    node, typ, vmid = guest_args(d)
+    if "onboot" not in d:
+        raise ApiError(400, "Rien à changer")
+    pve("PUT", f"/nodes/{node}/{typ}/{vmid}/config", {"onboot": 1 if d["onboot"] else 0})
+    return {"ok": True, "onboot": bool(d["onboot"])}
+
+
 def r_power(d):
     node, typ, vmid = guest_args(d)
     action = d.get("action")
@@ -2161,6 +2170,7 @@ ROUTES = {
     ("GET", "/api/rrd"): r_rrd,
     ("GET", "/api/guest"): r_guest,
     ("POST", "/api/power"): r_power,
+    ("POST", "/api/guest/config"): r_guest_config,
     ("GET", "/api/snapshots"): r_snapshots,
     ("POST", "/api/snapshot"): r_snap_create,
     ("POST", "/api/snapshot/rollback"): r_snap_rollback,

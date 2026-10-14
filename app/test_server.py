@@ -278,4 +278,11 @@ assert f[104] == {"pm": "apt", "packages": ["openssl"]} and f[105] == {"pm": Non
 assert srv.qm_output(_j.dumps({"pid": 42}))[0] == 124            # délai dépassé : pas un succès
 assert srv.qm_output(_j.dumps({"exitcode": 3, "exited": 1, "err-data": "E"})) == (3, "E")
 assert "qm guest exec 104 --timeout 60" in srv.guest_exec({"type": "qemu", "vmid": 104}, "id", 60)
+# démarrage avec le serveur
+put = []
+srv.pve = lambda m, path, params=None, timeout=30: put.append((m, path, params))
+assert srv.r_guest_config({"node": "pve", "type": "lxc", "vmid": 101, "onboot": True})["onboot"] is True
+assert put[-1] == ("PUT", "/nodes/pve/lxc/101/config", {"onboot": 1})
+srv.r_guest_config({"node": "pve", "type": "qemu", "vmid": 104, "onboot": False})
+assert put[-1] == ("PUT", "/nodes/pve/qemu/104/config", {"onboot": 0})
 print("ok")
