@@ -387,6 +387,16 @@ const kind = t => t === "qemu" ? "VM" : "CT";
 const STATUS = { running: "En marche", stopped: "Arrêtée", paused: "En pause", online: "En ligne", offline: "Hors ligne" };
 const when = ts => new Date(ts * 1000).toLocaleString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 
+// iOS : un 2e appui rapide au même endroit déclenche un zoom ; on l'annule (le pincement à deux doigts reste possible).
+// touch-action:manipulation (CSS) suffit en principe, ceci couvre les cas où iOS l'ignore.
+let lastTap = { t: 0, el: null };
+document.addEventListener("touchend", e => {
+  if (e.touches.length || e.changedTouches.length !== 1 || e.target.closest("input,textarea,select,[contenteditable]")) return;
+  const now = Date.now();
+  if (now - lastTap.t < 350 && lastTap.el === e.target) e.preventDefault();
+  lastTap = { t: now, el: e.target };
+}, { passive: false });
+
 // ---------- api
 async function api(path, opts = {}) {
   const r = await fetch(path, { method: opts.method || (opts.body ? "POST" : "GET"),
