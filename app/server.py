@@ -2338,6 +2338,8 @@ KNOWN_APPS = {
     "photoprism": ("PhotoPrism", "photoprism"), "kavita": ("Kavita", "kavita"), "calibre-web": ("Calibre-Web", "calibre-web"),
     "ntfy": ("ntfy", "ntfy"), "gotify": ("Gotify", "gotify"), "stirling-pdf": ("Stirling-PDF", "stirling-pdf"),
     "it-tools": ("IT-Tools", "it-tools"), "2fauth": ("2FAuth", "2fauth"), "docker": ("Docker", "docker"),
+    "meyectl": ("motionEye", "motioneye"), "motioneye": ("motionEye", "motioneye"), "hermes": ("Hermes", "hermes-agent"),
+    "hermes-agent": ("Hermes", "hermes-agent"), "pvehub": ("PVE Hub", "pvehub"),
 }
 # Ports bien connus quand le processus ne dit rien (node, python, java…)
 PORT_APPS = {8123: "hass", 8096: "jellyfin", 32400: "plex", 9443: "portainer", 9091: "transmission", 8989: "sonarr", 7878: "radarr",
@@ -2556,6 +2558,7 @@ def r_apps(q):
         for a in found:
             web = sorted(p for p in a["ports"] if p not in NOT_WEB)
             app = {"id": f"{g['id']}:{a['icon'] or a['name']}", "name": a["name"], "icon": a["icon"], "url": None,
+                   "icon2": re.sub(r"[^a-z0-9]+", "-", (g.get("name") or "").lower()).strip("-") or None,
                    "guest": f"{g['type']}/{g['vmid']}", "store": g["vmid"] if st else None, "old": [f"{g['id']}:{p}" for p in a["ports"]],
                    "cands": [app_url(ip, p) for p in web] if ip else []}
             if st and len(found) == 1:  # app du Store : le nom choisi à l'installation
@@ -2583,7 +2586,7 @@ def r_apps(q):
         apps.append({**link, "custom": True})
     for a in apps:  # réglages de l'utilisateur, y compris ceux faits avant (un id par port)
         over = cfg["over"].get(a["id"]) or next((cfg["over"][o] for o in a.get("old", []) if o in cfg["over"]), {})
-        a.update({k: v for k, v in over.items() if k in ("url", "hidden", "name") and v})
+        a.update({k: v for k, v in over.items() if k in ("url", "hidden", "name", "icon") and v})
         if over.get("url"):
             a["cands"] = [over["url"]]
     def probe(a):
@@ -2631,6 +2634,11 @@ def r_apps_save(d):
                 over["url"] = clean_url(d["url"])
             if "hidden" in d:
                 over["hidden"] = bool(d["hidden"])
+            if "icon" in d:  # nom d'un logo selfh.st, ou adresse https d'une image ; vide = logo détecté
+                ic = str(d["icon"] or "").strip()
+                if ic and not (RE_SLUG.match(ic.lower()) or (re.match(r"^https://[^\s\"'<>]+$", ic) and len(ic) <= 300)):
+                    raise ApiError(400, "Logo invalide : un nom (ex. jellyfin) ou une adresse https://")
+                over["icon"] = ic.lower() if RE_SLUG.match(ic.lower()) else ic
             cfg["over"][aid] = {k: v for k, v in over.items() if v not in ("", None, False)}
         else:
             raise ApiError(400, "Demande invalide")

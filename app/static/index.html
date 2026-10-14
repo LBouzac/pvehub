@@ -178,6 +178,7 @@ canvas{width:100%;height:120px;display:block}
 .alert p{margin:0 0 10px;font-size:13px}
 .alert input,.alert select{width:100%;margin-top:8px;padding:7px 8px;font-size:16px;border:.5px solid var(--sep);border-radius:7px;background:var(--card);outline:0}
 .alert .af{display:block;text-align:left;font-size:13px;color:var(--label2);margin-top:10px}.alert .af input{margin-top:3px;color:var(--label)}
+.alert p a{color:var(--accent)}
 .alert .abtns{display:flex;border-top:.5px solid var(--sep)}
 .alert .abtns button{flex:1;height:44px;color:var(--accent);font-size:17px}
 .alert .abtns button+button{border-left:.5px solid var(--sep);font-weight:600}
@@ -199,7 +200,8 @@ canvas{width:100%;height:120px;display:block}
 .app{display:flex;flex-direction:column;align-items:center;gap:6px;text-decoration:none;color:var(--label);position:relative;min-width:0}
 .app .ai{width:62px;height:62px;border-radius:15px;display:grid;place-items:center;position:relative;overflow:hidden;color:#fff;font-size:26px;font-weight:600;
   box-shadow:0 1px 3px rgba(0,0,0,.12)}
-.app .ai img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;padding:11px;background:var(--card)}
+.app .ai img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;padding:11px;background:#fff;opacity:0}
+.app .ai img.ok{opacity:1}.app .ai img[src^="/icon.png"]{padding:0}
 .app .an{font-size:12px;text-align:center;width:100%;line-height:1.2;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .app .st{position:absolute;top:-3px;right:calc(50% - 37px);width:13px;height:13px;border-radius:50%;border:2.5px solid var(--bg);background:var(--gray)}
 .app .st.up{background:var(--green)}.app .st.down{background:var(--red)}
@@ -1013,15 +1015,17 @@ async function loadApps(rescan) {
   if (S.view === "apps") renderApps();
 }
 // logo : bibliothèque selfh.st (comme le Store), sinon l'icône du site si le navigateur peut la charger, sinon l'initiale
-function appImgErr(img) { if (img.dataset.alt) { img.src = img.dataset.alt; delete img.dataset.alt; } else img.remove(); }
+function appImgErr(img) { const alt = (img.dataset.alt || "").split(" ").filter(Boolean); if (alt.length) { img.dataset.alt = alt.slice(1).join(" "); img.src = alt[0]; } else img.remove(); }
+const logoSrc = s => s === "pvehub" ? "/icon.png?v=2" : /^https:/.test(s) ? s : CS_ICON(s);  // PVE Hub : notre propre logo
 function appTile(a) {
   let origin = ""; try { origin = new URL(a.url).origin; } catch {}
   const fav = origin && (location.protocol === "http:" || origin.startsWith("https:")) ? origin + "/favicon.ico" : "";
-  const src = a.icon ? CS_ICON(a.icon) : fav, alt = a.icon ? fav : "";
+  const all = [...new Set([a.icon && logoSrc(a.icon), a.icon2 && a.icon2 !== a.icon && CS_ICON(a.icon2), fav].filter(Boolean))];
+  const src = all[0] || "", alt = all.slice(1).join(" ");
   const letter = esc([...a.name.trim()][0]?.toUpperCase() || "?");
   const tag = S.appsEdit ? "button" : a.url && !a.off ? `a href="${esc(a.url)}" target="_blank" rel="noopener"` : `button data-gid="${esc(a.guest || "")}"`;
   return `<${tag} class="app ${a.hidden || a.off ? "hid" : ""}" data-app="${esc(a.id)}" title="${esc(a.url || (a.off ? "Machine arrêtée" : "Sans interface web"))}">
-    <span class="ai" style="background:var(--${appColor(a.name)})">${letter}${src ? `<img src="${esc(src)}" ${alt ? `data-alt="${esc(alt)}"` : ""} alt="" loading="lazy" onerror="appImgErr(this)">` : ""}</span>
+    <span class="ai" style="background:var(--${appColor(a.name)})">${letter}${src ? `<img src="${esc(src)}" ${alt ? `data-alt="${esc(alt)}"` : ""} alt="" loading="lazy" onload="this.classList.add('ok')" onerror="appImgErr(this)">` : ""}</span>
     ${a.hidden ? "" : `<span class="st ${a.up === true ? "up" : a.up === false ? "down" : ""}"></span>`}
     <span class="an">${esc(a.name)}</span></${tag.split(" ")[0]}>`;
 }
@@ -1067,7 +1071,7 @@ $("#v-apps").addEventListener("click", async e => {
   }
   const t = e.target.closest("[data-app]"); if (!t) return;
   const a = S.apps.find(x => x.id === t.dataset.app); if (!a) return;
-  const btns = [{ label: "Renommer" }, { label: "Changer l'adresse" }, { label: a.hidden ? "Afficher" : "Masquer" }];
+  const btns = [{ label: "Renommer" }, { label: "Changer l'adresse" }, { label: a.hidden ? "Afficher" : "Masquer" }, { label: "Changer le logo" }];
   if (a.custom) btns.push({ label: "Supprimer le lien", danger: true });
   if (a.store) btns.push({ label: "Désinstaller l'app…", danger: true });
   const i = await actionSheet(esc(a.name), esc(a.url || "Sans interface web"), btns);
@@ -1075,7 +1079,12 @@ $("#v-apps").addEventListener("click", async e => {
   if (i === 0) { const v = await alertForm("Renommer", "Laisse vide pour revenir au nom d'origine.", [{ name: "name", ph: "Nom", value: a.name }]); if (v) saveApp({ op: "edit", id: a.id, name: v.name }); }
   if (i === 1) { const v = await alertForm("Adresse", "", [{ name: "url", ph: "http://…", value: a.url || "" }]); if (v) saveApp({ op: "edit", id: a.id, url: v.url }); }
   if (i === 2) saveApp({ op: "edit", id: a.id, hidden: !a.hidden });
-  if (i === 3) saveApp({ op: "delete", id: a.id });
+  if (i === 3) {
+    const v = await alertForm("Logo", `Le nom d'un logo de <a href="https://selfh.st/icons/" target="_blank" rel="noopener">selfh.st/icons</a> (ex. vaultwarden), ou l'adresse https d'une image. Laisse vide pour revenir au logo détecté.`,
+      [{ name: "icon", ph: "jellyfin", value: a.icon || "" }]);
+    if (v) saveApp({ op: "edit", id: a.id, icon: v.icon });
+  }
+  if (a.custom && i === 4) saveApp({ op: "delete", id: a.id });
 });
 
 async function uninstallApp(a) {
