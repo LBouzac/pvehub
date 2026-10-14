@@ -30,6 +30,9 @@ B64
   base64 -d > "$WORK/static/icon.svg"              <<'B64'
 @@ICON@@
 B64
+  base64 -d > "$WORK/static/sw.js"                 <<'B64'
+@@SW@@
+B64
 }
 
 push_app() {  # $1 = CTID
@@ -38,7 +41,7 @@ push_app() {  # $1 = CTID
   # VERSION et CTID servent au bouton « Mettre à jour » de l'app
   echo "@@VERSION@@" > "$WORK/VERSION"; echo "$1" > "$WORK/CTID"
   pct push "$1" "$WORK/VERSION" /opt/pvehub/VERSION; pct push "$1" "$WORK/CTID" /opt/pvehub/CTID
-  for f in index.html manifest.webmanifest icon.svg; do pct push "$1" "$WORK/static/$f" "/opt/pvehub/static/$f"; done
+  for f in index.html manifest.webmanifest icon.svg sw.js; do pct push "$1" "$WORK/static/$f" "/opt/pvehub/static/$f"; done
 }
 
 # Redémarrage différé de 3 s : lancé depuis l'onglet Commandes, la réponse arrive avant la coupure.
@@ -100,7 +103,7 @@ provision() {
   for _ in $(seq 30); do ctsh "$id" "nslookup dl-cdn.alpinelinux.org >/dev/null 2>&1" && break; sleep 2; done
 
   say "Installation de Python (seule dépendance)"
-  ctsh "$id" "apk add -q --no-cache python3 && adduser -S -D -H -h /opt/pvehub/ssh -s /sbin/nologin pvehub"
+  ctsh "$id" "apk add -q --no-cache python3 py3-cryptography && adduser -S -D -H -h /opt/pvehub/ssh -s /sbin/nologin pvehub"
   push_app "$id"
   cat > "$WORK/initd" <<'EOF'
 #!/sbin/openrc-run
@@ -173,6 +176,9 @@ update)
   CTID=${2:?usage : bash pvehub-install.sh update <CTID>}
   say "Mise à jour de PVE Hub dans le CT $CTID"
   push_app "$CTID"
+  # module de chiffrement pour les notifications (déjà là = rien à faire)
+  ctsh "$CTID" "if command -v apk >/dev/null; then apk add -q --no-cache py3-cryptography;
+    else DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3-cryptography >/dev/null; fi" || echo "⚠️  Module de notifications non installé (le reste fonctionne)."
   setup_exec "$CTID" || true
   ctsh "$CTID" "chown -R pvehub /opt/pvehub"
   restart_app "$CTID"
@@ -187,7 +193,8 @@ migrate)
   pct pull "$OLD" /opt/pvehub/.env "$WORK/env"
   mkdir -p "$WORK/ssh"
   for f in id_ed25519 id_ed25519.pub known_hosts; do pct pull "$OLD" "/opt/pvehub/ssh/$f" "$WORK/ssh/$f" 2>/dev/null || true; done
-  pct pull "$OLD" /opt/pvehub/data/apps.json "$WORK/apps.json" 2>/dev/null || true
+  mkdir -p "$WORK/data"
+  for f in apps.json push.json vapid.pem alerts.json; do pct pull "$OLD" "/opt/pvehub/data/$f" "$WORK/data/$f" 2>/dev/null || true; done
   NET=$(pct config "$OLD" | sed -n 's/^net0: //p')  # même pont et même adresse MAC → même IP en DHCP
   STORE=$(pct config "$OLD" | sed -n 's/^rootfs: \([^:]*\):.*/\1/p')
   NEW=$(pvesh get /cluster/nextid)
@@ -197,7 +204,7 @@ migrate)
   pct stop "$OLD"
   if ! provision "$NEW" "$STORE" "$NET" || ! {
        pct push "$NEW" "$WORK/env" /opt/pvehub/.env --perms 600
-       [ -s "$WORK/apps.json" ] && pct push "$NEW" "$WORK/apps.json" /opt/pvehub/data/apps.json
+       for f in apps.json push.json vapid.pem alerts.json; do [ -s "$WORK/data/$f" ] && pct push "$NEW" "$WORK/data/$f" "/opt/pvehub/data/$f"; done
        if [ -s "$WORK/ssh/id_ed25519" ]; then
          ctsh "$NEW" "mkdir -p /opt/pvehub/ssh/.ssh"
          for f in id_ed25519 id_ed25519.pub known_hosts; do [ -s "$WORK/ssh/$f" ] && pct push "$NEW" "$WORK/ssh/$f" "/opt/pvehub/ssh/$f"; done

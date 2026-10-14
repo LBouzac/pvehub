@@ -682,6 +682,301 @@ def r_cron_save(d):
     return r_cron(d)
 
 
+# ---------------------------------------------------------------- notifications (Web Push : RFC 8291 + VAPID RFC 8292)
+PUSH_FILE = os.path.join(DATA_DIR, "push.json")        # abonnements des appareils
+VAPID_FILE = os.path.join(DATA_DIR, "vapid.pem")       # clé privée du serveur, créée au premier usage
+ALERTS_FILE = os.path.join(DATA_DIR, "alerts.json")    # réglages des alertes + petit état persistant
+_push_lock = threading.Lock()
+try:
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    PUSH_OK = True
+except ImportError:  # paquet py3-cryptography absent : notifications indisponibles, le reste marche
+    PUSH_OK = False
+
+
+def b64u(b):
+    return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+
+
+def unb64u(s):
+    return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
+
+
+def read_json(path, default):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return default
+
+
+def write_json(path, obj):
+    os.makedirs(DATA_DIR, exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(obj, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, path)
+
+
+def raw_pub(key):
+    return key.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
+
+
+def vapid_key():
+    with _push_lock:
+        try:
+            with open(VAPID_FILE, "rb") as f:
+                return serialization.load_pem_private_key(f.read(), None)
+        except OSError:
+            key = ec.generate_private_key(ec.SECP256R1())
+            os.makedirs(DATA_DIR, exist_ok=True)
+            with open(VAPID_FILE, "wb") as f:
+                os.chmod(VAPID_FILE, 0o600)
+                f.write(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                          serialization.NoEncryption()))
+            return key
+
+
+def vapid_header(endpoint, key):
+    aud = "{0.scheme}://{0.netloc}".format(urllib.parse.urlsplit(endpoint))
+    claims = {"aud": aud, "exp": int(time.time()) + 3000, "sub": f"https://github.com/{UPDATE_REPO}"}
+    signing_input = b64u(json.dumps({"typ": "JWT", "alg": "ES256"}).encode()) + "." + b64u(json.dumps(claims).encode())
+    r, s = decode_dss_signature(key.sign(signing_input.encode(), ec.ECDSA(hashes.SHA256())))
+    jwt = signing_input + "." + b64u(r.to_bytes(32, "big") + s.to_bytes(32, "big"))
+    return f"vapid t={jwt}, k={b64u(raw_pub(key))}"
+
+
+def hkdf(salt, ikm, info, length):
+    prk = hmac.new(salt, ikm, hashlib.sha256).digest()
+    return hmac.new(prk, info + b"\x01", hashlib.sha256).digest()[:length]
+
+
+def encrypt_push(payload, p256dh, auth, salt=None, eph=None):
+    """Chiffrement aes128gcm d'un message pour un abonnement (RFC 8291). salt/eph : fixés seulement pour les tests."""
+    ua_pub = unb64u(p256dh)
+    eph = eph or ec.generate_private_key(ec.SECP256R1())
+    as_pub = raw_pub(eph)
+    secret = eph.exchange(ec.ECDH(), ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), ua_pub))
+    ikm = hkdf(unb64u(auth), secret, b"WebPush: info\x00" + ua_pub + as_pub, 32)
+    salt = salt or secrets.token_bytes(16)
+    cek = hkdf(salt, ikm, b"Content-Encoding: aes128gcm\x00", 16)
+    nonce = hkdf(salt, ikm, b"Content-Encoding: nonce\x00", 12)
+    body = AESGCM(cek).encrypt(nonce, payload + b"\x02", None)
+    return salt + (4096).to_bytes(4, "big") + bytes([len(as_pub)]) + as_pub + body
+
+
+def send_push(title, body, url="/", tag=None):
+    """Envoie à tous les appareils abonnés. Retourne le nombre d'envois réussis ; retire les abonnements expirés."""
+    if not PUSH_OK:
+        return 0
+    key, ok, gone = vapid_key(), 0, []
+    payload = json.dumps({"title": title, "body": body, "url": url, "tag": tag}).encode()
+    for sub in read_json(PUSH_FILE, []):
+        try:
+            req = urllib.request.Request(sub["endpoint"], method="POST",
+                                         data=encrypt_push(payload, sub["keys"]["p256dh"], sub["keys"]["auth"]))
+            for k, v in {"Content-Encoding": "aes128gcm", "Content-Type": "application/octet-stream", "TTL": "86400",
+                         "Urgency": "high", "Authorization": vapid_header(sub["endpoint"], key)}.items():
+                req.add_header(k, v)
+            urllib.request.urlopen(req, timeout=15).close()
+            ok += 1
+        except urllib.error.HTTPError as e:
+            if e.code in (404, 410):
+                gone.append(sub["endpoint"])  # appareil désabonné ou app supprimée
+            print("Notification refusée :", e.code, e.read()[:200], file=sys.stderr)
+        except (urllib.error.URLError, OSError, KeyError, ValueError) as e:
+            print("Notification non envoyée :", repr(e), file=sys.stderr)
+    if gone:
+        with _push_lock:
+            write_json(PUSH_FILE, [s for s in read_json(PUSH_FILE, []) if s["endpoint"] not in gone])
+    return ok
+
+
+ALERT_DEFAULTS = {"stopped": True, "disk": True, "disk_threshold": 90, "backup": True, "updates": True}
+
+
+def alert_settings():
+    return {**ALERT_DEFAULTS, **read_json(ALERTS_FILE, {}).get("settings", {})}
+
+
+def r_push_info(_):
+    if not PUSH_OK:
+        return {"available": False}
+    return {"available": True, "key": b64u(raw_pub(vapid_key())), "devices": len(read_json(PUSH_FILE, [])),
+            "settings": alert_settings()}
+
+
+def r_push_subscribe(d):
+    if not PUSH_OK:
+        raise ApiError(503, "Notifications indisponibles : mets à jour PVE Hub depuis le Shell de Proxmox")
+    sub = d.get("subscription") or {}
+    endpoint, keys = str(sub.get("endpoint", "")), sub.get("keys") or {}
+    if not endpoint.startswith("https://") or len(endpoint) > 1000 or not keys.get("p256dh") or not keys.get("auth"):
+        raise ApiError(400, "Abonnement invalide")
+    with _push_lock:
+        subs = [s for s in read_json(PUSH_FILE, []) if s["endpoint"] != endpoint]
+        subs.append({"endpoint": endpoint, "keys": {"p256dh": str(keys["p256dh"]), "auth": str(keys["auth"])},
+                     "name": str(d.get("name", ""))[:60], "at": int(time.time())})
+        write_json(PUSH_FILE, subs)
+    return {"ok": True, "devices": len(subs)}
+
+
+def r_push_unsubscribe(d):
+    with _push_lock:
+        subs = [s for s in read_json(PUSH_FILE, []) if s["endpoint"] != d.get("endpoint")]
+        write_json(PUSH_FILE, subs)
+    return {"ok": True, "devices": len(subs)}
+
+
+def r_push_test(_):
+    n = send_push("PVE Hub", "Les notifications fonctionnent ✓", tag="test")
+    if not n:
+        raise ApiError(502, "Aucune notification envoyée : active-les d'abord sur cet appareil (voir le journal en cas d'erreur)")
+    return {"sent": n}
+
+
+def r_alert_settings(d):
+    s = alert_settings()
+    for k in ("stopped", "disk", "backup", "updates"):
+        if k in d:
+            s[k] = bool(d[k])
+    if "disk_threshold" in d:
+        try:
+            s["disk_threshold"] = max(50, min(99, int(d["disk_threshold"])))
+        except (TypeError, ValueError):
+            raise ApiError(400, "Seuil invalide")
+    with _push_lock:  # la surveillance écrit aussi dans ce fichier (clé "state")
+        cur = read_json(ALERTS_FILE, {})
+        cur["settings"] = s
+        write_json(ALERTS_FILE, cur)
+    return {"settings": s}
+
+
+# ---------------------------------------------------------------- surveillance (alertes)
+# Tâches Proxmox qui arrêtent une machine volontairement : si l'une d'elles est récente, l'arrêt n'est pas une panne
+STOP_TASKS = {"qmstop", "qmshutdown", "qmreboot", "qmsuspend", "qmpause", "qmhibernate", "qmigrate", "qmrestore",
+              "qmrollback", "qmdestroy", "vzstop", "vzshutdown", "vzreboot", "vzsuspend", "vzmigrate", "vzrestore",
+              "vzrollback", "vzdestroy", "vzdump"}
+
+
+def gname(g):
+    return f"{'VM' if g.get('type') == 'qemu' else 'CT'} {g.get('vmid')}" + (f" « {g['name']} »" if g.get("name") else "")
+
+
+def check_stopped(prev, guests, tasks, now):
+    """Machines passées de « running » à « stopped » sans tâche d'arrêt récente (panne, OOM…)."""
+    backup_running = any(t.get("type") == "vzdump" and (not t.get("endtime") or now - t["starttime"] < 900) for t in tasks)
+    alerts = []
+    for g in guests:
+        if prev.get(g["id"]) != "running" or g.get("status") != "stopped":
+            continue
+        asked = any(t.get("type") in STOP_TASKS and str(t.get("id")) == str(g["vmid"]) and now - t.get("starttime", 0) < 900
+                    for t in tasks)
+        if not asked and not backup_running:  # une sauvegarde en mode « stop » arrête les machines un moment
+            alerts.append(("Machine arrêtée", f"{gname(g)} s'est arrêtée sans qu'aucun arrêt n'ait été demandé.", f"/#g={g['id']}"))
+    return alerts
+
+
+def check_disk(items, threshold, alerted, now):
+    """items : [(clé, libellé, utilisé, total)]. Alerte au franchissement du seuil, rappel toutes les 24 h, réarmement sous seuil-5."""
+    alerts = []
+    for key, label, used, total in items:
+        if not total:
+            continue
+        p = 100 * used / total
+        if p >= threshold and now - alerted.get(key, 0) > 86400:
+            alerted[key] = now
+            alerts.append(("Espace disque", f"{label} est plein à {p:.0f} % ({fmt_bytes(used)} sur {fmt_bytes(total)}).", "/"))
+        elif p < threshold - 5:
+            alerted.pop(key, None)
+    return alerts
+
+
+def check_failed_backups(tasks, since):
+    """Sauvegardes terminées en erreur depuis le dernier passage. Retourne (alertes, nouveau repère)."""
+    done = [t for t in tasks if t.get("type") == "vzdump" and t.get("endtime") and t["endtime"] > since]
+    bad = [t for t in done if t.get("status") != "OK"]
+    alerts = [("Sauvegarde en échec", f"Sauvegarde{' de la machine ' + str(t['id']) if t.get('id') else ''} du "
+               f"{time.strftime('%d/%m à %H:%M', time.localtime(t['starttime']))} : {t.get('status')}", "/#maint") for t in bad]
+    return alerts, max([since] + [t["endtime"] for t in done])
+
+
+def check_late_backups(rows, now):
+    """Machines incluses dans une sauvegarde planifiée dont la dernière sauvegarde a plus de 7 jours (ou aucune)."""
+    late = [r for r in rows if r["planned"] and (not r["last"] or now - r["last"]["ctime"] > 7 * 86400)]
+    if not late:
+        return []
+    names = ", ".join(r["name"] or str(r["vmid"]) for r in late[:5]) + ("…" if len(late) > 5 else "")
+    return [("Sauvegardes en retard", f"Pas de sauvegarde depuis plus de 7 jours : {names}.", "/#maint")]
+
+
+def disk_items(nodes, storages, guests):
+    items = [(f"node:{n['node']}", f"Le disque système de {n['node']}", n.get("disk", 0), n.get("maxdisk", 0)) for n in nodes]
+    items += [(f"st:{s['node']}:{s['storage']}", f"Le stockage {s['storage']}", s.get("disk", 0), s.get("maxdisk", 0))
+              for s in storages if s.get("status") == "available"]
+    # disque des conteneurs (Proxmox ne connaît pas l'occupation réelle du disque d'une VM)
+    items += [(f"ct:{g['vmid']}", f"Le disque de {gname(g)}", g.get("disk", 0), g.get("maxdisk", 0))
+              for g in guests if g.get("type") == "lxc" and g.get("status") == "running"]
+    return items
+
+
+def monitor_loop():
+    ctx = {"prev": {}, "first": True}
+    while True:
+        try:
+            monitor_once(ctx)
+        except Exception as e:  # noqa: BLE001 — la surveillance ne doit jamais s'arrêter
+            print("Surveillance :", repr(e), file=sys.stderr)
+        time.sleep(60)
+
+
+def monitor_once(ctx):
+    """Un passage de surveillance ; ctx garde l'état des machines entre deux passages."""
+    now = int(time.time())
+    s = alert_settings()
+    with _push_lock:
+        state = read_json(ALERTS_FILE, {}).get("state") or {"disk": {}, "failed_end": now, "updates_sent": now}
+    before = json.dumps(state, sort_keys=True)
+    guests = [g for g in pve("GET", "/cluster/resources", {"type": "vm"}) or [] if not g.get("template")]
+    tasks = pve("GET", "/cluster/tasks") or []
+    alerts = []
+    if s["stopped"] and not ctx["first"]:
+        alerts += check_stopped(ctx["prev"], guests, tasks, now)
+    ctx["prev"], ctx["first"] = {g["id"]: g.get("status") for g in guests}, False
+    if s["disk"]:
+        nodes = pve("GET", "/nodes") or []
+        storages = pve("GET", "/cluster/resources", {"type": "storage"}) or []
+        alerts += check_disk(disk_items(nodes, storages, guests), s["disk_threshold"], state["disk"], now)
+    a, state["failed_end"] = check_failed_backups(tasks, state.get("failed_end", now))
+    alerts += a if s["backup"] else []
+    # une fois par jour, en matinée : machines couvertes par une sauvegarde planifiée mais pas sauvegardées depuis 7 jours
+    today = time.strftime("%Y-%m-%d", time.localtime(now))
+    if s["backup"] and state.get("late_day") != today and time.localtime(now).tm_hour >= 9:
+        state["late_day"] = today
+        alerts += check_late_backups(r_maint_backups({})["guests"], now)
+    # résumé hebdomadaire des mises à jour, en matinée (heure du conteneur)
+    if s["updates"] and EXEC_ENABLED and now - state.get("updates_sent", now) > 7 * 86400 and time.localtime(now).tm_hour >= 9:
+        state["updates_sent"] = now
+        scan_updates()
+        cts = [c for c in _updates["cts"].values() if c["packages"]]
+        host = len((_updates.get("host") or {}).get("packages", []))
+        if cts or host:
+            parts = [f"{len(cts)} conteneur{'s' if len(cts) > 1 else ''} ({sum(len(c['packages']) for c in cts)} paquets)"] if cts else []
+            parts += [f"l'hôte ({host} paquets)"] if host else []
+            alerts.append(("Mises à jour disponibles", " et ".join(parts) + " à mettre à jour.", "/#maint"))
+    for title, body, url in alerts:
+        send_push(title, body, url, tag=title)
+    if json.dumps(state, sort_keys=True) != before:
+        with _push_lock:
+            cur = read_json(ALERTS_FILE, {})
+            cur["state"] = state
+            write_json(ALERTS_FILE, cur)
+    return alerts
+
+
 # ---------------------------------------------------------------- accès à distance (Tailscale)
 def own_ip():
     """IP de ce conteneur vue depuis l'hôte Proxmox."""
@@ -1124,6 +1419,11 @@ ROUTES = {
     ("GET", "/api/maint/job"): r_maint_job,
     ("GET", "/api/cron"): r_cron,
     ("POST", "/api/cron"): r_cron_save,
+    ("GET", "/api/push"): r_push_info,
+    ("POST", "/api/push/subscribe"): r_push_subscribe,
+    ("POST", "/api/push/unsubscribe"): r_push_unsubscribe,
+    ("POST", "/api/push/test"): r_push_test,
+    ("POST", "/api/alerts"): r_alert_settings,
     ("GET", "/api/version"): r_version,
     ("GET", "/api/remote"): r_remote,
     ("POST", "/api/update"): r_update,
@@ -1135,6 +1435,7 @@ ROUTES = {
 if __name__ == "__main__":
     if not APP_PASSWORD:
         print("⚠️  APP_PASSWORD vide : l'interface est accessible sans mot de passe.", file=sys.stderr)
+    threading.Thread(target=monitor_loop, daemon=True).start()
     srv = ThreadingHTTPServer((HOST, PORT), Handler)
     srv.daemon_threads = True
     print(f"PVE Hub sur http://{HOST}:{PORT} → {PVE_URL}" + (f" | Hermes {HERMES_URL}" if HERMES_URL else ""))

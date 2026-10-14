@@ -46,6 +46,53 @@ assert srv.is_up(_fake_tcp(b"")) is None or srv.is_up(_fake_tcp(b"")) is False
 assert srv.is_up(_fake_tcp(b"HTTP/1.0 401 Unauthorized\r\n\r\n")) is True
 assert srv.is_up("http://127.0.0.1:1") is False
 
+# notifications : chiffrement identique au vecteur officiel de la RFC 8291 (annexe A)
+if srv.PUSH_OK:
+    from cryptography.hazmat.primitives.asymmetric import ec
+    eph = ec.derive_private_key(int.from_bytes(srv.unb64u("yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw"), "big"), ec.SECP256R1())
+    out = srv.encrypt_push(b"When I grow up, I want to be a watermelon",
+                           "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4",
+                           "BTBZMqHH6r4Tts7J_aSIgg", salt=srv.unb64u("DGv6ra1nlYgDCS1FRnbzlw"), eph=eph)
+    assert srv.b64u(out) == ("DGv6ra1nlYgDCS1FRnbzlwAAEABBBP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A_"
+                             "yl95bQpu6cVPTpK4Mqgkf1CXztLVBSt2Ks3oZwbuwXPXLWyouBWLVWGNWQexSgSxsj_Qulcy4a-fN")
+else:
+    print("(cryptography absent : test des notifications ignoré)")
+
+# alertes : machine arrêtée sans demande, arrêts volontaires ignorés
+NOW = 1_800_000_000
+G = lambda vmid, st, t="lxc": {"id": f"{t}/{vmid}", "vmid": vmid, "type": t, "status": st, "name": f"m{vmid}"}
+prev = {"lxc/101": "running", "lxc/102": "running", "qemu/103": "running", "lxc/104": "stopped"}
+now_g = [G(101, "stopped"), G(102, "stopped"), G(103, "stopped", "qemu"), G(104, "stopped")]
+tasks = [{"type": "vzshutdown", "id": "102", "starttime": NOW - 60, "endtime": NOW - 50, "status": "OK"},
+         {"type": "qmstop", "id": "103", "starttime": NOW - 3600, "endtime": NOW - 3590, "status": "OK"}]  # trop ancien
+al = srv.check_stopped(prev, now_g, tasks, NOW)
+assert [a[2] for a in al] == ["/#g=lxc/101", "/#g=qemu/103"], al            # 102 arrêtée volontairement, 104 l'était déjà
+assert srv.check_stopped(prev, now_g, tasks + [{"type": "vzdump", "id": "", "starttime": NOW - 100}], NOW) == []  # sauvegarde en cours
+
+# alertes : disque — franchissement, pas de répétition avant 24 h, réarmement sous le seuil - 5
+alerted = {}
+items = [("st:pve:local", "Le stockage local", 92, 100), ("node:pve", "Le disque système de pve", 50, 100)]
+assert len(srv.check_disk(items, 90, alerted, NOW)) == 1 and "st:pve:local" in alerted
+assert srv.check_disk(items, 90, alerted, NOW + 3600) == []
+assert len(srv.check_disk(items, 90, alerted, NOW + 90000)) == 1
+srv.check_disk([("st:pve:local", "x", 80, 100)], 90, alerted, NOW + 90001)
+assert "st:pve:local" not in alerted
+
+# alertes : sauvegardes en échec depuis le dernier passage, une seule fois
+t2 = [{"type": "vzdump", "id": "101", "starttime": NOW - 200, "endtime": NOW - 100, "status": "job errors"},
+      {"type": "vzdump", "id": "", "starttime": NOW - 900, "endtime": NOW - 800, "status": "OK"}]
+al, since = srv.check_failed_backups(t2, NOW - 1000)
+assert len(al) == 1 and since == NOW - 100
+assert srv.check_failed_backups(t2, since)[0] == []
+
+rows = [{"vmid": 1, "name": "a", "planned": True, "last": {"ctime": NOW - 86400}},
+        {"vmid": 2, "name": "b", "planned": True, "last": {"ctime": NOW - 9 * 86400}},
+        {"vmid": 3, "name": "c", "planned": True, "last": None},
+        {"vmid": 4, "name": "d", "planned": False, "last": None}]   # pas planifiée : on ne harcèle pas
+al = srv.check_late_backups(rows, NOW)
+assert len(al) == 1 and "b, c" in al[0][1] and "d" not in al[0][1].split(":")[1], al
+assert srv.check_late_backups(rows[:1], NOW) == []
+
 # Tailscale de l'hôte : retrouver l'adresse qui redirige vers ce conteneur
 SERVE = {"TCP": {"443": {"HTTPS": True}, "8443": {"HTTPS": True}},
          "Web": {"host-005.tail1234.ts.net:443": {"Handlers": {"/": {"Proxy": "https+insecure://127.0.0.1:8006"}}},

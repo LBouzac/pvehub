@@ -3,7 +3,7 @@
 import base64, hashlib, os
 D = os.path.dirname(os.path.abspath(__file__))
 FILES = {"SERVER": "app/server.py", "INDEX": "app/static/index.html",
-         "MANIFEST": "app/static/manifest.webmanifest", "ICON": "app/static/icon.svg"}
+         "MANIFEST": "app/static/manifest.webmanifest", "ICON": "app/static/icon.svg", "SW": "app/static/sw.js"}
 read = lambda p: open(os.path.join(D, p), "rb").read()
 tpl = read("install.tpl.sh").decode()
 # Version = empreinte du contenu : elle ne change que si le code change

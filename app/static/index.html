@@ -352,6 +352,7 @@ const I = {
   bolt: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>',
   term: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 7 5 5-5 5M12 17h7"/></svg>',
   chat: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3c5 0 9 3.4 9 7.6s-4 7.6-9 7.6c-.9 0-1.8-.1-2.6-.3L5 20.5l.9-3.9C4.1 15.2 3 13 3 10.6 3 6.4 7 3 12 3"/></svg>',
+  bell: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a6 6 0 0 0-6 6v3.6L4.3 15A1 1 0 0 0 5.2 16.5h13.6a1 1 0 0 0 .9-1.5L18 11.6V8a6 6 0 0 0-6-6m-2.5 16a2.5 2.5 0 0 0 5 0z"/></svg>',
   plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
   gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1"/></svg>',
   wrench: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><path d="M14.7 6.3a4 4 0 0 0 5 5L21 13l-8 8-3-3 8-8-1.3-1.3a4 4 0 0 0-5-5L14 6z"/></svg>',
@@ -935,6 +936,14 @@ function renderExecLog() {
 }
 
 // ---------- autorisations Hermes
+// Lien venant d'une notification : #maint (écran Maintenance) ou #g=lxc/101 (fiche d'une machine)
+function openFromHash() {
+  const h = decodeURIComponent(location.hash.slice(1)); if (!h || !S.ov) return;
+  history.replaceState(null, "", location.pathname);
+  if (h === "maint") openMaint();
+  else if (h.startsWith("g=") && findGuest(h.slice(2))) { setView("guests"); openGuest(h.slice(2)); }
+}
+
 // ---------- maintenance : sauvegardes + mises à jour des conteneurs
 const ago = ts => { const s = Date.now() / 1000 - ts; return s < 3600 ? `il y a ${Math.max(1, Math.round(s / 60))} min` : s < 86400 ? `il y a ${Math.round(s / 3600)} h` : `il y a ${Math.round(s / 86400)} j`; };
 const bkState = g => !g.last ? "none" : Date.now() / 1000 - g.last.ctime > 7 * 86400 ? "old" : "ok";
@@ -1100,6 +1109,58 @@ async function doUpdate() {
   } catch (e) { t.remove(); toast("❌ " + e.message.split("\n")[0], 8000); }
 }
 
+// ---------- notifications (Web Push)
+const pushSupported = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window && window.isSecureContext;
+async function pushState() {
+  try { S.push = await api("/api/push"); } catch { S.push = { available: false, error: true }; }
+  S.pushSub = null;
+  if (pushSupported()) try { S.pushSub = await (await navigator.serviceWorker.getRegistration())?.pushManager.getSubscription() || null; } catch {}
+}
+const deviceName = () => (navigator.userAgent.match(/iPhone|iPad|Android|Macintosh|Windows|Linux/) || ["Appareil"])[0].replace("Macintosh", "Mac");
+async function enablePush() {
+  try {
+    if (await Notification.requestPermission() !== "granted")  // doit être le premier « await » : iOS exige un geste de l'utilisateur
+      return toast("Notifications refusées. Pour les autoriser : Réglages de l'iPhone → Notifications → PVE Hub.", 7000);
+    const reg = await navigator.serviceWorker.register("/sw.js"); await navigator.serviceWorker.ready;
+    const key = Uint8Array.from(atob(S.push.key.replace(/-/g, "+").replace(/_/g, "/")), c => c.charCodeAt(0));
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+    S.push.devices = (await api("/api/push/subscribe", { body: { subscription: sub.toJSON(), name: deviceName() } })).devices;
+    S.pushSub = sub; toast("🔔 Notifications activées sur cet appareil");
+  } catch (e) { toast("❌ " + e.message, 7000); }
+}
+async function disablePush() {
+  try {
+    const endpoint = S.pushSub?.endpoint; await S.pushSub?.unsubscribe();
+    S.push.devices = (await api("/api/push/unsubscribe", { body: { endpoint } })).devices; S.pushSub = null;
+    toast("Notifications désactivées sur cet appareil");
+  } catch (e) { toast("❌ " + e.message); }
+}
+function notifHtml() {
+  const p = S.push;
+  if (!p) return `<div class="cell"><div class="body mute">Chargement…</div></div>`;
+  if (!p.available) return `<div class="cell"><div class="body"><div class="t">Mise à jour nécessaire</div><div class="s" style="line-height:1.35">
+    Le module de notifications n'est pas installé. Relance la mise à jour de PVE Hub (bouton ci-dessous ou depuis le Shell de Proxmox).</div></div></div>`;
+  let h = "";
+  if (!pushSupported()) h += `<div class="cell"><div class="body"><div class="t">Indisponible ici</div><div class="s" style="line-height:1.35">
+    Ouvre PVE Hub en HTTPS (adresse Tailscale) depuis son icône sur l'écran d'accueil. Sur iPhone, iOS 16.4 ou plus récent.</div></div></div>`;
+  else if (!S.pushSub) h += `<button class="cell icon tap act" id="pushOn">${icoBox(I.bell, "red")}<div class="body">Activer sur cet appareil</div></button>`;
+  else h += `<div class="cell icon">${icoBox(I.bell, "green")}<div class="body">Activées sur cet appareil</div></div>
+    <button class="cell tap act" id="pushTest"><div class="body">Envoyer une notification de test</div></button>
+    <button class="cell tap act danger" id="pushOff"><div class="body">Désactiver sur cet appareil</div></button>`;
+  const s = p.settings, sw = (k, label, sub) => `<label class="cell"><div class="body"><div>${label}</div>${sub ? `<div class="s">${sub}</div>` : ""}</div>
+    <span class="sw"><input type="checkbox" data-alert="${k}" ${s[k] ? "checked" : ""} aria-label="${label}"><span></span></span></label>`;
+  return h + `</div><div class="hdr">Alertes</div><div class="group">
+    ${sw("stopped", "Machine arrêtée", "Sans qu'aucun arrêt n'ait été demandé")}
+    ${sw("disk", "Disque ou stockage plein")}
+    ${s.disk ? `<label class="cell"><div class="body">Seuil</div><select class="picker" data-alert="disk_threshold" style="direction:ltr;text-align-last:right">${[80, 85, 90, 95].map(v => `<option value="${v}" ${s.disk_threshold == v ? "selected" : ""}>${v} %</option>`).join("")}</select>${I.chev}</label>` : ""}
+    ${sw("backup", "Sauvegardes", "Échec, ou machine non sauvegardée depuis 7 jours")}
+    ${sw("updates", "Résumé des mises à jour", "Une fois par semaine")}`;
+}
+function notifFooter() {
+  const n = S.push?.devices;
+  return S.push?.available ? `<div class="ftr">${n ? `${n} appareil${n > 1 ? "s" : ""} abonné${n > 1 ? "s" : ""}. ` : "Aucun appareil abonné pour l'instant. "}Les alertes sont vérifiées chaque minute par le serveur, même quand l'app est fermée.</div>` : "";
+}
+
 // ---------- accès à distance
 const tsCommand = () => `bash <(curl -fsSL https://raw.githubusercontent.com/${S.remote?.repo || "LBouzac/pvehub"}/main/pvehub-install.sh) tailscale ${S.remote?.ctid || "<ID>"}`;
 function remoteHtml() {
@@ -1140,6 +1201,9 @@ function openSettings() {
       <div class="ftr">${esc(ACCENTS.find(a => a[0] === acc)?.[1] || "")}</div>
       <div class="hdr">Fond</div>
       <div class="bgs">${BGS.map(([k, l]) => `<button class="bgopt ${bg === k ? "on" : ""}" data-bg="${k}"><span class="pv" data-pv="${k}"><b></b><b></b></span>${l}</button>`).join("")}</div>
+      <div class="hdr">Notifications</div>
+      <div class="group">${notifHtml()}</div>
+      ${notifFooter()}
       <div class="hdr">Accès à distance</div>
       <div class="group">${remoteHtml()}</div>
       <div class="ftr">${S.remote?.state === "Running" ? "Depuis l'extérieur : l'app Tailscale doit être connectée sur ton téléphone, avec le même compte."
@@ -1156,9 +1220,22 @@ function openSettings() {
   };
   draw();
   api("/api/remote").then(r => { S.remote = r; if (m.isConnected) draw(); }).catch(() => {});
+  pushState().then(() => { if (m.isConnected) draw(); });
+  m.onchange = async e => {  // réglages des alertes (communs à tous les appareils)
+    const k = e.target.dataset.alert; if (!k) return;
+    try { S.push.settings = (await api("/api/alerts", { body: { [k]: e.target.type === "checkbox" ? e.target.checked : +e.target.value } })).settings; }
+    catch (err) { toast("❌ " + err.message); }
+    draw();
+  };
   m.onclick = async e => {
     if (e.target === m || e.target.closest("[data-close]")) return m.remove();
     const cp = e.target.closest("[data-copy]"); if (cp) return copyText(cp.dataset.copy);
+    if (e.target.closest("#pushOn")) { await enablePush(); return draw(); }
+    if (e.target.closest("#pushOff")) { await disablePush(); return draw(); }
+    if (e.target.closest("#pushTest")) {
+      try { const r = await api("/api/push/test", { body: {} }); toast(`🔔 Envoyée à ${r.sent} appareil${r.sent > 1 ? "s" : ""}`); } catch (err) { toast("❌ " + err.message, 6000); }
+      return;
+    }
     if (e.target.closest("#doUpd")) { m.remove(); return doUpdate(); }
     if (e.target.closest("#chkUpd")) { e.target.closest("#chkUpd").querySelector(".body").textContent = "Vérification…"; await checkVersion(true); return draw(); }
     if (e.target.closest("#logout")) { await api("/api/logout", { body: {} }).catch(() => {}); m.remove(); return showLogin(); }
@@ -1347,6 +1424,8 @@ async function start() {
   try { S.ov = await api("/api/overview"); } catch (e) { if (e.message === "Non connecté") return; }
   $("#login").classList.add("hide"); $("#app").classList.remove("hide");
   setView(S.view); loop();
+  if ("serviceWorker" in navigator && window.isSecureContext) navigator.serviceWorker.register("/sw.js").catch(() => {});
+  openFromHash(); addEventListener("hashchange", openFromHash);
   checkVersion(); loadMaint(); setInterval(() => document.visibilityState === "visible" && loadMaint(), 300000);
   setInterval(() => document.visibilityState === "visible" && checkVersion(), 3600000);  // lit le cache du serveur, GitHub n'est interrogé qu'une fois par semaine
 }

@@ -12,6 +12,8 @@ Petite app web pour piloter ton Proxmox depuis le téléphone, avec l'agent IA H
   à jour, mise à jour d'un conteneur en un tap avec un snapshot pris juste avant
 - **Hermes** : il connaît l'état du serveur et peut proposer des actions que tu valides d'un tap ; il te demande
   l'autorisation avant ses commandes sensibles
+- **Notifications** sur le téléphone : machine arrêtée toute seule, disque plein, sauvegarde en échec ou en retard,
+  résumé hebdomadaire des mises à jour
 - **Mise à jour de l'app** en un tap, thèmes clair/sombre, couleurs au choix
 
 Ultra léger : un conteneur Alpine Linux (64 Mo de RAM alloués, environ 30 Mo utilisés, 1 Go de disque),
@@ -24,6 +26,7 @@ Python seul, aucune dépendance. L'app ne rafraîchit les données que lorsqu'el
 3. [Brancher Hermes](#3-brancher-hermes)
 4. [Mettre à jour](#4-mettre-à-jour)
 5. [Accès depuis l'extérieur (Tailscale)](#5-accès-depuis-lextérieur-tailscale)
+   - [Notifications sur le téléphone](#notifications-sur-le-téléphone)
 6. [Passer d'un ancien conteneur Debian à Alpine](#6-passer-dun-ancien-conteneur-debian-à-alpine)
 7. [Modifier la configuration](#7-modifier-la-configuration)
 8. [Dépannage](#8-dépannage)
@@ -165,6 +168,27 @@ pct set <ID> --delete dev0      # retire /dev/net/tun ; effectif au prochain red
 
 Si `pct set` répond que `dev0` n'existe pas, ignore : le réglage n'avait pas été fait.
 
+### Notifications sur le téléphone
+
+Les notifications ont besoin de l'adresse HTTPS (Tailscale, ci-dessus). Sur iPhone : iOS 16.4 ou plus récent.
+
+1. Mets PVE Hub à jour (roue dentée → Mise à jour) : la mise à jour installe le module de chiffrement nécessaire.
+2. Sur le téléphone, ouvre l'adresse **HTTPS** et ajoute-la à l'écran d'accueil (Partager → Sur l'écran d'accueil).
+3. Ouvre PVE Hub **depuis cette icône** (pas depuis Safari) : roue dentée → Notifications → **Activer sur cet
+   appareil**, puis accepte la demande d'iOS.
+4. Touche **Envoyer une notification de test** : elle doit arriver en quelques secondes.
+5. Choisis tes alertes juste en dessous (elles valent pour tous tes appareils) :
+   - **Machine arrêtée** : une VM ou un conteneur qui tournait s'arrête sans qu'aucun arrêt n'ait été lancé
+     (panne, manque de mémoire…). Un arrêt, un redémarrage, une sauvegarde ou une migration lancés depuis l'app ou
+     depuis Proxmox ne déclenchent rien ;
+   - **Disque ou stockage plein** : au-delà du seuil choisi (80 à 95 %), rappel au plus une fois par jour ;
+   - **Sauvegardes** : une sauvegarde en échec, et chaque matin les machines incluses dans une sauvegarde planifiée
+     mais pas sauvegardées depuis 7 jours ;
+   - **Résumé des mises à jour** : une fois par semaine, en matinée.
+
+Le serveur vérifie tout cela chaque minute, même quand l'app est fermée. Toucher une notification ouvre directement
+la machine concernée ou l'écran Maintenance. Répète l'étape 3 sur chaque appareil qui doit recevoir les alertes.
+
 ## 6. Passer d'un ancien conteneur Debian à Alpine
 
 Les installations d'avant octobre 2026 utilisaient Debian (128 Mo, 2 Go). Pour passer à Alpine, **depuis le Shell
@@ -230,6 +254,10 @@ Anciens conteneurs Debian : `journalctl -u pvehub -n 50` et `systemctl restart p
 | « cron n'est pas installé » | Dans le conteneur : `apk add cronie` (Alpine) ou `apt install cron` (Debian) |
 | « Snapshot impossible » pendant une mise à jour | Le stockage du conteneur ne gère pas les snapshots (il faut LVM-thin, ZFS ou Ceph) : l'app propose de continuer sans |
 | Réglages affiche « Tailscale installé mais pas connecté » | Voir [le nettoyage](#passer-de-loption-b-à-loption-a-nettoyage) si tu utilises le Tailscale de l'hôte |
+| Notifications « Indisponible ici » | Ouvre l'app en HTTPS (adresse Tailscale) et depuis son icône de l'écran d'accueil, pas depuis Safari (iOS 16.4+) |
+| Notifications « Mise à jour nécessaire » | Mets PVE Hub à jour : le module `py3-cryptography` sera installé |
+| La notification de test n'arrive pas | Le conteneur doit pouvoir joindre Internet (`web.push.apple.com` sur iPhone). Regarde le journal (« Notification refusée… »). Vérifie aussi Réglages de l'iPhone → Notifications → PVE Hub |
+| Plus de notifications après avoir supprimé l'icône | Normal : l'abonnement est lié à l'icône. Rajoute l'app à l'écran d'accueil et réactive |
 | Le conteneur ne démarre pas à l'installation | `pct start <ID> --debug` et regarde les dernières lignes |
 
 ## 9. Désinstaller
@@ -249,6 +277,8 @@ tailscale serve --https=8443 off                             # si tu avais publi
   peut donc tout faire sur le serveur. Choisis un mot de passe solide, ou désactive la section.
 - **Mise à jour depuis l'app** : elle exécute en root ce qui est publié sur le dépôt GitHub configuré. Active la
   double authentification sur ce compte GitHub.
+- Notifications : le contenu est chiffré de bout en bout entre ton serveur et ton téléphone (standard Web Push) ;
+  Apple ou Google ne font que transporter un message illisible.
 - Accès protégé par mot de passe (session de 30 jours).
 - Fait pour le réseau local. Depuis l'extérieur, passe par Tailscale ou un autre VPN, jamais par un port ouvert sur
   ta box.
