@@ -270,9 +270,11 @@ l'adresse affichée à l'installation sert de lien.
 
 **Désinstaller** : onglet Apps → **Modifier** → touche l'app → **Désinstaller l'app…**
 - « Sauvegarder puis supprimer » : sauvegarde complète du conteneur, puis arrêt et suppression (disques compris).
-  Si la sauvegarde échoue, rien n'est supprimé. Pour récupérer l'app plus tard, restaure cette sauvegarde depuis
-  Proxmox (stockage → Sauvegardes).
+  Si la sauvegarde échoue, rien n'est supprimé.
 - « Supprimer sans sauvegarde » : définitif.
+- **Réinstaller** : une app désinstallée avec sauvegarde apparaît en haut du Store, section **Désinstallées**. Un appui
+  recrée le conteneur depuis cette sauvegarde (même numéro s'il est libre), le démarre et le remet dans l'onglet Apps.
+  Impossible si la sauvegarde a été supprimée entre-temps (rotation des sauvegardes, par exemple).
 - Seules les apps installées par le Store proposent ce bouton ; tes autres machines ne peuvent pas être supprimées
   d'ici.
 

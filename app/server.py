@@ -1708,13 +1708,33 @@ def remember_install(job, before):
         write_json(INSTALLED_FILE, inst)
 
 
+REMOVED_FILE = os.path.join(DATA_DIR, "removed.json")  # apps désinstallées avec sauvegarde : réinstallables
+
+
+def newest_backup(node, vmid):
+    """volid de la sauvegarde la plus récente d'une machine, tous stockages de sauvegarde confondus."""
+    items = []
+    for st in backup_storages(node):
+        try:
+            got = pve("GET", f"/nodes/{node}/storage/{st}/content", {"content": "backup", "vmid": vmid})
+            items += got if isinstance(got, list) else []
+        except ApiError:
+            pass
+    items.sort(key=lambda i: i.get("ctime", 0))
+    return items[-1] if items else None
+
+
 def uninstall(job, vmid, backup):
     g = next((g for g in all_guests() if g["vmid"] == vmid), None)
     if not g:
         raise ApiError(404, f"La machine {vmid} n'existe plus")
-    if not same_guest(read_json(INSTALLED_FILE, {}).get(str(vmid), {}), g):
+    entry = read_json(INSTALLED_FILE, {}).get(str(vmid), {})
+    if not same_guest(entry, g):
         raise ApiError(409, f"La machine {vmid} n'est plus celle installée par le Store : rien n'a été supprimé")
     node, typ = g["node"], g["type"]
+    cfg = pve("GET", f"/nodes/{node}/{typ}/{vmid}/config")
+    rootfs_store = str((cfg if isinstance(cfg, dict) else {}).get("rootfs") or "").split(":", 1)[0] or None
+    bk = None
     if backup:
         storage = (backup_storages(node) or [None])[0]
         if not storage:
@@ -1724,6 +1744,7 @@ def uninstall(job, vmid, backup):
                                      "compress": "zstd", "notes-template": f"{job['name']} — avant désinstallation (PVE Hub)"}))
         if st != "OK":
             raise ApiError(502, f"Sauvegarde : {st} — rien n'a été supprimé")
+        bk = newest_backup(node, vmid)
     if g.get("status") == "running":
         job_log(job, "Arrêt…")
         st = wait_pve_task(node, pve("POST", f"/nodes/{node}/{typ}/{vmid}/status/stop"))
@@ -1738,12 +1759,69 @@ def uninstall(job, vmid, backup):
         inst = read_json(INSTALLED_FILE, {})
         inst.pop(str(vmid), None)
         write_json(INSTALLED_FILE, inst)
+        if bk and bk.get("volid"):
+            removed = [r for r in read_json(REMOVED_FILE, []) if r["volid"] != bk["volid"]]
+            removed.append({"id": secrets.token_hex(4), "name": job["name"], "source": entry.get("source", ""), "url": entry.get("url"),
+                            "node": node, "vmid": vmid, "storage": rootfs_store, "volid": bk["volid"], "ctime": bk.get("ctime", 0),
+                            "at": int(time.time())})
+            write_json(REMOVED_FILE, removed[-20:])
+
+
+def restore_app(job, rid):
+    """Recrée le conteneur depuis la sauvegarde faite à la désinstallation, le démarre et le remet dans l'onglet Apps."""
+    r = next((x for x in read_json(REMOVED_FILE, []) if x["id"] == rid), None)
+    if not r:
+        raise ApiError(404, "App inconnue")
+    node = r["node"]
+    if not any(b.get("volid") == r["volid"] for b in
+               pve("GET", f"/nodes/{node}/storage/{r['volid'].split(':', 1)[0]}/content", {"content": "backup", "vmid": r["vmid"]}) or []):
+        raise ApiError(404, "La sauvegarde n'existe plus (supprimée ou effacée par la rotation des sauvegardes)")
+    used = {g["vmid"] for g in all_guests()}
+    vmid = r["vmid"] if r["vmid"] not in used else int(pve("GET", "/cluster/nextid"))
+    job_log(job, f"Restauration de la sauvegarde dans le conteneur {vmid}…")
+    # stockage d'origine, sinon le premier qui accepte des conteneurs ; le reste de la configuration vient de la sauvegarde
+    storage = r.get("storage") or next((x["storage"] for x in pve("GET", f"/nodes/{node}/storage", {"enabled": 1}) or []
+                                        if "rootdir" in (x.get("content") or "")), None)
+    params = {"vmid": vmid, "ostemplate": r["volid"], "restore": 1, "storage": storage}
+    st = wait_pve_task(node, pve("POST", f"/nodes/{node}/lxc", params))
+    if st != "OK":
+        raise ApiError(502, f"Restauration : {st}")
+    job_log(job, "Démarrage…")
+    wait_pve_task(node, pve("POST", f"/nodes/{node}/lxc/{vmid}/status/start"))
+    job.update(vmid=vmid, url=r.get("url"))
+    remember_install(job, set())
+    with _installed_lock:
+        write_json(REMOVED_FILE, [x for x in read_json(REMOVED_FILE, []) if x["id"] != rid])
+
+
+def r_store_removed(_):
+    return {"items": sorted(read_json(REMOVED_FILE, []), key=lambda r: -r["at"])}
+
+
+def r_store_restore(d):
+    rid = str(d.get("id", ""))
+    r = next((x for x in read_json(REMOVED_FILE, []) if x["id"] == rid), None)
+    if not r:
+        raise ApiError(404, "App inconnue")
+    if d.get("forget"):  # retirer de la liste : la sauvegarde, elle, reste sur le stockage
+        with _installed_lock:
+            write_json(REMOVED_FILE, [x for x in read_json(REMOVED_FILE, []) if x["id"] != rid])
+        return {"ok": True}
+    if any(j.get("rid") == rid and j["status"] == "running" for j in list(_store_jobs.values())):
+        raise ApiError(409, "Réinstallation déjà en cours")
+    job_id = secrets.token_hex(6)
+    _store_jobs[job_id] = job = {"id": job_id, "kind": "restore", "rid": rid, "source": r["source"], "name": r["name"],
+                                 "status": "running", "at": int(time.time()), "log": []}
+    threading.Thread(target=run_store_job, args=(job, "restore", rid), daemon=True).start()
+    return {"job": job_id}
 
 
 def run_store_job(job, kind, *args):
     try:
         if kind == "uninstall":
             uninstall(job, *args)
+        elif kind == "restore":
+            restore_app(job, *args)
         else:
             before = {g["vmid"] for g in all_guests()}
             (install_community if kind == "community" else install_turnkey)(job, *args)
@@ -1754,7 +1832,7 @@ def run_store_job(job, kind, *args):
     except Exception as e:  # noqa: BLE001
         job.update(status="error", error=str(e)[:200])
     job_log(job, "✓ Terminé" if job["status"] == "done" else f"✕ {job.get('error')}")
-    verb = "désinstallé" if kind == "uninstall" else "installé"
+    verb = {"uninstall": "désinstallé", "restore": "réinstallé"}.get(kind, "installé")
     log_event("store", f"{job['name']} {verb}" if job["status"] == "done" else f"{job['name']} : échec",
               job.get("error") or (f"Conteneur {job['vmid']}" if job.get("vmid") else ""))
 
@@ -2390,6 +2468,8 @@ ROUTES = {
     ("POST", "/api/store/uninstall"): r_store_uninstall,
     ("GET", "/api/events"): r_events,
     ("GET", "/api/disks"): r_disks,
+    ("GET", "/api/store/removed"): r_store_removed,
+    ("POST", "/api/store/restore"): r_store_restore,
     ("GET", "/api/schedules"): r_schedules,
     ("POST", "/api/schedules"): r_schedules_save,
     ("POST", "/api/settings"): r_app_settings,

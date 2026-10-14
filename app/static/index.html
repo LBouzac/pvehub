@@ -1181,9 +1181,13 @@ function openFromHash() {
 // ---------- store : applications à installer (communauté + modèles officiels TurnKey)
 S.store = { src: "community", tag: "", q: "", items: {}, jobs: store.get("pvehub.storeJobs", {}) };
 const CS_ICON = slug => `https://cdn.jsdelivr.net/gh/selfhst/icons/webp/${slug}.webp`;  // logos du catalogue communautaire
+async function loadRemoved() {
+  try { S.store.removed = (await api("/api/store/removed")).items; } catch { S.store.removed = []; }
+  if (S.storeOpen) renderStore();
+}
 function openStore() {
   S.storeOpen = true; $("#store").scrollTop = 0; $("#store").classList.add("open"); history.pushState({ s: 1 }, "");
-  renderStore(); loadStore();
+  renderStore(); loadStore(); loadRemoved();
 }
 function closeStore() { S.storeOpen = false; $("#store").classList.remove("open"); clearTimeout(S.storePoll); }
 async function loadStore(refresh) {
@@ -1219,9 +1223,12 @@ function renderStore() {
     <h1 class="large">Store</h1>
     <div class="seg" id="storeSrc"><button data-src="community" class="${S.store.src === "community" ? "on" : ""}">Communauté</button><button data-src="turnkey" class="${S.store.src === "turnkey" ? "on" : ""}">Officiel</button></div>
     <div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="storeQ" type="search" placeholder="Rechercher une app" value="${esc(S.store.q)}" aria-label="Rechercher une app"></div>
-    ${tags.length ? `<div class="chips" style="margin-bottom:12px" id="storeTags"><button class="chip" data-tag="" style="${S.store.tag ? "" : "background:var(--accent);color:var(--on-accent)"}">Toutes</button>${tags.map(t =>
+    ${tags.length ? `<div class="chips" style="margin-bottom:12px" id="storeTags"><button class="chip" data-tag="" style="font-family:var(--font);${S.store.tag ? "" : "background:var(--accent);color:var(--on-accent)"}">Toutes</button>${tags.map(t =>
       `<button class="chip" data-tag="${esc(t)}" style="font-family:var(--font);${S.store.tag === t ? "background:var(--accent);color:var(--on-accent)" : ""}">${esc(t)}</button>`).join("")}</div>` : ""}
-    ${running.length ? `<div class="group" style="margin-bottom:14px">${running.map(j => `<button class="cell icon tap" data-job="${j.id}">${icoBox(I.backup, "accent")}<div class="body"><div class="t">${j.kind === "uninstall" ? "Désinstallation" : "Installation"} de ${esc(j.name)}…</div><div class="s">Touche pour suivre</div></div>${I.chev}</button>`).join("")}</div>` : ""}
+    ${running.length ? `<div class="group" style="margin-bottom:14px">${running.map(j => `<button class="cell icon tap" data-job="${j.id}">${icoBox(I.backup, "accent")}<div class="body"><div class="t">${JOB_WORD[j.kind]?.[0] || "Installation"} de ${esc(j.name)}…</div><div class="s">Touche pour suivre</div></div>${I.chev}</button>`).join("")}</div>` : ""}
+    ${S.store.removed?.length ? `<div class="hdr">Désinstallées</div><div class="group" style="margin-bottom:14px">${S.store.removed.map(r =>
+      `<button class="cell icon tap" data-removed="${esc(r.id)}">${icoBox(I.backup, "gray")}<div class="body"><div class="t ell">${esc(r.name)}</div>
+        <div class="s">Sauvegarde du ${when(r.ctime || r.at)} · CT ${r.vmid}</div></div><span class="pill">Réinstaller</span></button>`).join("")}</div>` : ""}
     <div class="group" id="storeList">`;
   if (S.store.err) h += `<div class="cell"><div class="body mute">${esc(S.store.err)}</div></div>`;
   else if (!r) h += `<div class="cell"><div class="body mute">Chargement…</div></div>`;
@@ -1245,6 +1252,8 @@ $("#store").addEventListener("click", e => {
   if (tag) { S.store.tag = tag.dataset.tag; renderStore(); }
   if (it) openStoreItem(S.store.items[S.store.src].items.find(x => x.id === it.dataset.item), S.store.src);
   if (jb) followJob(S.store.jobs[jb.dataset.job]);
+  const rm = e.target.closest("[data-removed]");
+  if (rm) restoreApp(S.store.removed.find(x => x.id === rm.dataset.removed));
 });
 const csCommand = id => `bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/${id}.sh)"`;
 async function openStoreItem(item, src) {
@@ -1296,6 +1305,7 @@ async function openStoreItem(item, src) {
   });
   document.body.appendChild(m);
 }
+const JOB_WORD = { uninstall: ["Désinstallation", "Désinstallé"], restore: ["Réinstallation", "Réinstallé"] };
 const saveJobs = () => store.set("pvehub.storeJobs", Object.fromEntries(Object.entries(S.store.jobs).slice(-10)));
 function followJob(job) {
   const m = document.createElement("div"); m.className = "modal";
@@ -1303,13 +1313,13 @@ function followJob(job) {
   const draw = () => {
     const done = job.status !== "running", un = job.kind === "uninstall";
     m.innerHTML = `<div class="card-sheet"><div class="grab"></div><div class="shead"><span style="width:84px"></span><h2>${esc(job.name)}</h2><button class="navbtn" style="font-weight:600;width:84px;justify-content:flex-end" data-close>${done ? "OK" : "Masquer"}</button></div>
-      <div class="group" style="margin-top:12px"><div class="cell"><div class="body"><div class="t">${job.status === "running" ? (un ? "⏳ Désinstallation en cours…" : "⏳ Installation en cours…") : job.status === "done" ? (un ? "✅ Désinstallé" : "✅ Installé") : "❌ Échec"}</div>
+      <div class="group" style="margin-top:12px"><div class="cell"><div class="body"><div class="t">${job.status === "running" ? `⏳ ${JOB_WORD[job.kind]?.[0] || "Installation"} en cours…` : job.status === "done" ? `✅ ${JOB_WORD[job.kind]?.[1] || "Installé"}` : "❌ Échec"}</div>
         ${job.error ? `<div class="s" style="color:var(--red)">${esc(job.error)}</div>` : ""}${job.vmid ? `<div class="s">Conteneur ${job.vmid}</div>` : ""}</div></div>
         ${job.url && !un ? `<a class="cell tap act" href="${esc(job.url)}" target="_blank" rel="noopener"><div class="body">Ouvrir ${esc(job.url)}</div></a>` : ""}
         ${job.password ? `<div class="cell"><div class="body">Mot de passe root</div><div class="v" style="font-family:var(--mono);font-size:15px">${esc(job.password)}</div></div>
           <button class="cell tap act" data-copypw><div class="body">Copier le mot de passe</div></button>` : ""}</div>
       ${job.password && done ? `<div class="ftr" style="line-height:1.4">Dernière étape : dans Proxmox, ouvre la <b>Console</b> du conteneur ${job.vmid} et connecte-toi en <b>root</b> avec ce mot de passe. L'assistant TurnKey te demande alors les mots de passe de l'application et termine sa configuration. Note ce mot de passe : il ne sera plus affiché.</div>` : ""}
-      ${done && job.status === "done" && !job.password ? `<div class="ftr">${un ? "La sauvegarde éventuelle reste sur le stockage indiqué dans le journal : restaurable depuis Proxmox (stockage → Sauvegardes)." : "L'app apparaîtra dans l'onglet Apps (Modifier → toucher l'app pour la désinstaller)."}</div>` : ""}
+      ${done && job.status === "done" && !job.password ? `<div class="ftr">${un ? "Avec une sauvegarde, l'app reste réinstallable depuis le Store (section « Désinstallées »)." : "L'app apparaîtra dans l'onglet Apps (Modifier → toucher l'app pour la désinstaller)."}</div>` : ""}
       <div class="hdr">Journal</div><div class="group"><pre class="out" id="jobLog">${esc((job.log || []).slice(-40).join("\n") || "…")}</pre></div></div>`;
     const pre = m.querySelector("#jobLog"); pre.scrollTop = pre.scrollHeight;
   };
@@ -1324,10 +1334,23 @@ function followJob(job) {
       await new Promise(r => setTimeout(r, 2000));
       try { Object.assign(job, await api("/api/store/job?" + qs({ id: job.id }))); }
       catch (e) { job.status = "error"; job.error = e.message; }
-      if (job.status !== "running") { saveJobs(); S.apps = null; if (job.status === "done") toast(`✅ ${job.name} ${job.kind === "uninstall" ? "désinstallé" : "installé"}`); if (S.view === "apps") loadApps(); }
+      if (job.status !== "running") { saveJobs(); S.apps = null; if (job.status === "done") toast(`✅ ${job.name} ${(JOB_WORD[job.kind]?.[1] || "Installé").toLowerCase()}`); if (S.storeOpen) loadRemoved(); if (S.view === "apps") loadApps(); }
       if (!stop) draw();
     }
   })();
+}
+
+async function restoreApp(r) {
+  if (!r) return;
+  const i = await actionSheet(`Réinstaller ${esc(r.name)} ?`, `Le conteneur est recréé à partir de sa sauvegarde du ${when(r.ctime || r.at)}, tel qu'il était à la désinstallation, puis démarré.`,
+    [{ label: "Réinstaller" }, { label: "Retirer de la liste", danger: true }]);
+  if (i === 1) { await api("/api/store/restore", { body: { id: r.id, forget: true } }).catch(e => toast("❌ " + e.message)); return loadRemoved(); }
+  if (i !== 0) return;
+  try {
+    const j = await api("/api/store/restore", { body: { id: r.id } });
+    S.store.jobs[j.job] = { id: j.job, kind: "restore", name: r.name, status: "running", log: [] }; saveJobs();
+    followJob(S.store.jobs[j.job]);
+  } catch (e) { toast("❌ " + e.message, 6000); }
 }
 
 // ---------- maintenance : sauvegardes + mises à jour des conteneurs

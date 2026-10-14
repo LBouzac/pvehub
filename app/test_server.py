@@ -355,4 +355,28 @@ try:
     srv.r_schedules_save({"op": "add", "action": "start", "time": "08:00", "days": "all", "targets": []}); raise AssertionError
 except srv.ApiError:
     pass
+# désinstaller avec sauvegarde, puis réinstaller : même ID si libre, sinon un nouveau ; retour dans l'onglet Apps
+srv.REMOVED_FILE = os.path.join(srv.DATA_DIR, "removed.json")
+world = {"guests": [{"vmid": 130, "node": "pve", "type": "lxc", "status": "running", "name": "kuma", "id": "lxc/130"}], "calls": []}
+BK = {"volid": "local:backup/vzdump-lxc-130-2026_10_14.tar.zst", "ctime": NOW, "vmid": 130}
+def fake2(m, path, params=None, timeout=30):
+    world["calls"].append((m, path.split("?")[0], params))
+    if path == "/cluster/resources": return world["guests"]
+    if path == "/cluster/nextid": return "140"
+    if path.endswith("/config"): return {"rootfs": "local-lvm:vm-130-disk-0,size=4G"}
+    if path.endswith("/storage"): return [{"storage": "local", "content": "backup,vztmpl"}]
+    if path.endswith("/content"): return [BK]
+    if m == "DELETE": world["guests"] = [g for g in world["guests"] if g["vmid"] != 130]
+    if m == "POST" and path == "/nodes/pve/lxc": world["guests"].append({"vmid": params["vmid"], "node": "pve", "type": "lxc", "status": "stopped", "name": "kuma", "id": f"lxc/{params['vmid']}"})
+    return "UPID:x"
+srv.pve, srv.wait_pve_task = fake2, lambda n, u: "OK"
+srv.write_json(srv.INSTALLED_FILE, {"130": {"name": "Uptime Kuma", "source": "community", "url": "http://x:3001", "guest": "kuma"}})
+srv.uninstall({"name": "Uptime Kuma", "log": []}, 130, True)
+rem = srv.r_store_removed({})["items"]
+assert len(rem) == 1 and rem[0]["volid"] == BK["volid"] and rem[0]["storage"] == "local-lvm"
+job = {"name": "Uptime Kuma", "source": "community", "log": []}
+srv.restore_app(job, rem[0]["id"])
+create = [c for c in world["calls"] if c[0] == "POST" and c[1] == "/nodes/pve/lxc"][-1][2]
+assert create == {"vmid": 130, "ostemplate": BK["volid"], "restore": 1, "storage": "local-lvm"}, create   # ID d'origine libre
+assert "130" in srv.read_json(srv.INSTALLED_FILE, {}) and srv.r_store_removed({})["items"] == []
 print("ok")
