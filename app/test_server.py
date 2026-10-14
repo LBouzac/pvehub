@@ -226,4 +226,19 @@ try:
     srv.uninstall({"name": "x", "log": []}, 120, True); raise AssertionError
 except srv.ApiError as e:
     assert "rien n'a été supprimé" in e.msg and not any(c[0] == "DELETE" for c in calls)
+# conversations Hermes : enregistrement, liste (plus récente d'abord), suppression, validation
+srv.CHATS_FILE = os.path.join(srv.DATA_DIR, "chats.json")
+srv.r_chat_save({"id": "aaaa1111", "title": "  Disque   plein ?  ", "messages": [{"role": "user", "content": "x"}, {"role": "system", "content": "pirate"}]})
+srv.r_chat_save({"id": "bbbb2222", "messages": [{"role": "assistant", "content": "☀️ Rapport"}], "report": "r1"})
+c = srv.r_chat_get({"id": "aaaa1111"})
+assert c["title"] == "Disque plein ?" and [m["role"] for m in c["messages"]] == ["user"], c        # rôle inconnu écarté
+lst = srv.r_chats({})["chats"]
+assert {x["id"] for x in lst} == {"aaaa1111", "bbbb2222"} and next(x for x in lst if x["id"] == "bbbb2222")["report"] == "r1"
+for bad in ({"id": "../etc", "messages": []}, {"id": "aaaa1111", "messages": "x"}):
+    try:
+        srv.r_chat_save(bad); raise AssertionError(bad)
+    except srv.ApiError:
+        pass
+srv.r_chat_delete({"id": "aaaa1111"})
+assert [x["id"] for x in srv.r_chats({})["chats"]] == ["bbbb2222"]
 print("ok")

@@ -888,6 +888,49 @@ def log_event(kind, title, body="", url=None, **extra):
         print("Journal :", repr(e), file=sys.stderr)
 
 
+# Conversations Hermes : sur le serveur, donc les mêmes sur tous les appareils
+CHATS_FILE = os.path.join(DATA_DIR, "chats.json")
+RE_CHAT = re.compile(r"^[a-f0-9]{8,32}$")
+_chats_lock = threading.Lock()
+
+
+def r_chats(_):
+    chats = read_json(CHATS_FILE, {})
+    return {"chats": sorted(({"id": c["id"], "title": c["title"], "updated": c["updated"], "count": len(c["messages"]),
+                              "report": c.get("report")} for c in chats.values()), key=lambda c: -c["updated"])}
+
+
+def r_chat_get(q):
+    c = read_json(CHATS_FILE, {}).get(str(q.get("id", "")))
+    if not c:
+        raise ApiError(404, "Conversation introuvable")
+    return c
+
+
+def r_chat_save(d):
+    cid, msgs = str(d.get("id", "")), d.get("messages")
+    if not RE_CHAT.match(cid) or not isinstance(msgs, list):
+        raise ApiError(400, "Conversation invalide")
+    msgs = [m for m in msgs if isinstance(m, dict) and m.get("role") in ("user", "assistant", "note")][-150:]
+    title = re.sub(r"\s+", " ", str(d.get("title") or "")).strip()[:80]
+    with _chats_lock:
+        chats = read_json(CHATS_FILE, {})
+        old = chats.get(cid, {})
+        chats[cid] = {"id": cid, "title": title or old.get("title") or "Conversation", "created": old.get("created", int(time.time())),
+                      "updated": int(time.time()), "report": d.get("report") or old.get("report"), "messages": msgs}
+        # 100 conversations au plus : les plus anciennes partent
+        write_json(CHATS_FILE, dict(sorted(chats.items(), key=lambda kv: kv[1]["updated"])[-100:]))
+    return {"ok": True}
+
+
+def r_chat_delete(d):
+    with _chats_lock:
+        chats = read_json(CHATS_FILE, {})
+        chats.pop(str(d.get("id", "")), None)
+        write_json(CHATS_FILE, chats)
+    return {"ok": True}
+
+
 def r_events(q):
     ev = read_json(EVENTS_FILE, [])
     kind = q.get("kind")
@@ -2003,6 +2046,10 @@ def r_tasks(q):
 ROUTES = {
     ("POST", "/api/store/uninstall"): r_store_uninstall,
     ("GET", "/api/events"): r_events,
+    ("GET", "/api/chats"): r_chats,
+    ("GET", "/api/chats/get"): r_chat_get,
+    ("POST", "/api/chats/save"): r_chat_save,
+    ("POST", "/api/chats/delete"): r_chat_delete,
     ("GET", "/api/overview"): r_overview,
     ("GET", "/api/rrd"): r_rrd,
     ("GET", "/api/guest"): r_guest,

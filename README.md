@@ -96,6 +96,11 @@ l'exécute avec son propre jeton. Le bouclier de l'onglet Hermes permet de l'aut
 sans risque (démarrer, éteindre, redémarrer, snapshot, sauvegarde). « Toujours » sur une demande d'autorisation est
 retenu par Hermes lui-même : pour l'annuler, modifie sa configuration.
 
+**Conversations** : dans l'onglet Hermes, l'icône en haut à gauche ouvre l'historique (recherche, reprendre une
+conversation, **Modifier** pour en supprimer) ; l'icône crayon en haut à droite démarre une nouvelle conversation.
+Chaque rapport du matin a sa propre conversation (☀️). Les conversations sont gardées sur le serveur
+(`data/chats.json`, les 100 plus récentes) : tu les retrouves sur tous tes appareils.
+
 ## 4. Mettre à jour
 
 **Depuis l'app** (section Commandes activée) : quand une nouvelle version existe, un bandeau apparaît sur l'onglet

@@ -291,7 +291,7 @@ canvas{width:100%;height:120px;display:block}
 </div>
 
 <div id="app" class="hide">
-  <div class="navbar" id="nav"><div class="nt" id="navTitle"></div><div class="side"></div><div class="side r" id="navRight"></div></div>
+  <div class="navbar" id="nav"><div class="nt" id="navTitle"></div><div class="side" id="navLeft"></div><div class="side r" id="navRight"></div></div>
   <main>
     <section id="v-dash"></section>
     <section id="v-guests" class="hide">
@@ -304,6 +304,7 @@ canvas{width:100%;height:120px;display:block}
     <section id="v-exec" class="hide"></section>
     <section id="v-chat" class="hide">
       <h1 class="large">Hermes</h1>
+      <div id="chatTitle" class="mute ell" style="margin:-6px 16px 10px;font-size:15px"></div>
       <div id="chat"></div>
       <div class="composer" id="composer">
         <textarea id="prompt" rows="1" placeholder="Message" aria-label="Message à Hermes"></textarea>
@@ -323,6 +324,7 @@ canvas{width:100%;height:120px;display:block}
 <div class="push" id="maint"></div>
 <div class="push" id="store"></div>
 <div class="push" id="journal"></div>
+<div class="push" id="chats"></div>
 <div class="push" id="sheet" style="z-index:35"></div>
 <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
 
@@ -358,6 +360,9 @@ const I = {
   bag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 7h12l1 13H5zM9 7a3 3 0 0 1 6 0"/></svg>',
   plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
   gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1"/></svg>',
+  list: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></svg>',
+  compose: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6"/><path d="M18.4 2.6a2 2 0 0 1 2.9 2.9L12 14.8l-3.8 1 1-3.8z"/></svg>',
+  trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>',
   wrench: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><path d="M14.7 6.3a4 4 0 0 0 5 5L21 13l-8 8-3-3 8-8-1.3-1.3a4 4 0 0 0-5-5L14 6z"/></svg>',
 };
 const icoBox = (svg, color) => `<span class="ico" style="background:var(--${color})">${svg}</span>`;
@@ -466,14 +471,20 @@ function setView(v) {
   document.querySelectorAll(".tabbar button").forEach(b => b.classList.toggle("on", b.dataset.v === v));
   ["dash", "guests", "apps", "exec", "chat"].forEach(k => $("#v-" + k).classList.toggle("hide", k !== v));
   $("#navTitle").textContent = TITLES[v];
-  $("#navRight").innerHTML = (v === "chat" ? (S.ov?.hermes ? `<button class="navbtn" id="permBtn" aria-label="Autorisations">${I.shield}</button>` : "")
+  $("#navLeft").innerHTML = v === "chat" && S.ov?.hermes ? `<button class="navbtn" id="histBtn" aria-label="Conversations">${I.list}</button>` : "";
+  $("#navRight").innerHTML = (v === "chat" ? (S.ov?.hermes ? `<button class="navbtn" id="newChat" aria-label="Nouvelle conversation">${I.compose}</button><button class="navbtn" id="permBtn" aria-label="Autorisations">${I.shield}</button>` : "")
     : v === "apps" ? `${S.appsEdit ? "" : `<button class="navbtn" id="storeBtn" aria-label="Store">${I.bag}</button>`}<button class="navbtn" id="editApps">${S.appsEdit ? "<b>OK</b>" : "Modifier"}</button>`
     : `<span class="live" id="live"><i></i>en direct</span>`) + `<button class="navbtn" id="setBtn" aria-label="Apparence et réglages" style="position:relative">${I.gear}${S.ver?.available ? '<i class="badge"></i>' : ""}</button>`;
   $("#setBtn").onclick = openSettings;
   $("#storeBtn") && ($("#storeBtn").onclick = openStore);
   $("#editApps") && ($("#editApps").onclick = () => { S.appsEdit = !S.appsEdit; setView("apps"); });
   if (v === "apps" && (!S.apps || Date.now() - S.appsAt > 30000)) loadApps();
-  if (v === "chat") { $("#permBtn") && ($("#permBtn").onclick = openPerms); renderChat(); scrollChat(); }
+  if (v === "chat") {
+    $("#permBtn") && ($("#permBtn").onclick = openPerms);
+    $("#histBtn") && ($("#histBtn").onclick = openChats);
+    $("#newChat") && ($("#newChat").onclick = newConv);
+    renderChat(); scrollChat();
+  }
   else scrollTo(0, 0);
   render(); onScroll();
 }
@@ -565,7 +576,7 @@ function openGuest(id) {
   renderGuest(); loadGuestExtras();
 }
 function closeGuest() { S.guest = null; $("#sheet").classList.remove("open"); }
-addEventListener("popstate", () => { if (S.guest) closeGuest(); else if (S.maintOpen) closeMaint(); else if (S.storeOpen) closeStore(); else if (S.jOpen) closeJournal(); });
+addEventListener("popstate", () => { if (S.guest) closeGuest(); else if (S.maintOpen) closeMaint(); else if (S.storeOpen) closeStore(); else if (S.jOpen) closeJournal(); else if (S.cOpen) closeChats(); });
 
 function renderGuest() {
   const g = findGuest(S.guest); if (!g) return;
@@ -1354,9 +1365,11 @@ async function openLatestReport() {
 function openReport(rep) {
   const when = new Date(rep.ts * 1000).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
   if (!S.ov?.hermes) return showPackages("Rapport du matin", rep.text.split("\n"));
-  // le rapport entre dans la conversation : on peut répondre à Hermes juste en dessous
-  if (!S.chat.some(m => m.reportId === rep.id)) { S.chat.push({ role: "assistant", content: `☀️ **Rapport du ${when}**\n\n${rep.text}`, reportId: rep.id }); saveChat(); }
-  setView("chat");
+  // chaque rapport a sa conversation : on peut répondre à Hermes juste en dessous
+  const known = (S.chats || []).find(c => c.report === rep.id);
+  if (known) return openConv(known.id);
+  if (!S.busy) setConv({ id: null, title: `Rapport du ${when}`, report: rep.id, messages: [{ role: "assistant", content: `☀️ **Rapport du ${when}**\n\n${rep.text}` }] });
+  saveChat(); setView("chat");
 }
 
 // ---------- accès à distance
@@ -1560,7 +1573,6 @@ function openPerms() {
 }
 
 // ---------- chat Hermes
-S.chat = store.get("pvehub.chat", []);
 const CHOICE = { once: "Autoriser", session: "Pour la session", always: "Toujours", deny: "Refuser" };
 const actionBlocks = text => [...text.matchAll(/```pvehub\n?([\s\S]*?)```/g)].map(m => m[1].trim());
 function md(m) {
@@ -1597,15 +1609,98 @@ function msgHtml(m, idx) {
 function renderChat() {
   if (!S.ov?.hermes) { $("#chat").innerHTML = `<div class="empty">Hermes n'est pas configuré.<br>Renseigne HERMES_URL et HERMES_KEY dans /opt/pvehub/.env.</div>`; $("#composer").classList.add("hide"); return; }
   $("#composer").classList.remove("hide");
+  $("#chatTitle").textContent = S.chat.length ? S.conv.title || "" : "";
   $("#chat").innerHTML = S.chat.length ? S.chat.map(msgHtml).join("") + `<button class="chip" style="align-self:center;margin-top:16px;font-family:var(--font);color:var(--accent)" id="clearChat">Nouvelle conversation</button>`
     : `<div class="empty">Demande à Hermes comment va ton serveur, ou ce qu'il ferait.<br><br>
       <button class="chip" data-ex="Comment va mon serveur ?">Comment va mon serveur ?</button><button class="chip" data-ex="Quelle machine consomme le plus ?">Quelle machine consomme le plus ?</button></div>`;
 }
 const scrollChat = () => requestAnimationFrame(() => scrollTo(0, document.body.scrollHeight));
-const saveChat = () => store.set("pvehub.chat", S.chat.slice(-80));
+// ---------- conversations Hermes (sur le serveur : les mêmes sur tous les appareils)
+S.conv = { id: null, title: "", messages: [] }; S.chat = S.conv.messages;
+const newId = () => [...crypto.getRandomValues(new Uint8Array(8))].map(b => b.toString(16).padStart(2, "0")).join("");
+function setConv(c) {
+  S.conv = c; S.chat = c.messages; S.pending = [];
+  store.set("pvehub.chatId", c.id);
+  if (S.view === "chat") { renderChat(); scrollChat(); }
+}
+function saveChat(conv = S.conv) {
+  if (!conv.messages.length) return;
+  if (!conv.id) { conv.id = newId(); if (conv === S.conv) store.set("pvehub.chatId", conv.id); }
+  if (!conv.title) { const u = conv.messages.find(m => m.role === "user"); conv.title = u ? u.content.replace(/\s+/g, " ").slice(0, 60) : ""; }
+  const c = (S.chats ||= []).find(x => x.id === conv.id);  // liste à jour sans attendre le serveur
+  if (c) Object.assign(c, { title: conv.title, updated: Date.now() / 1000, count: conv.messages.length });
+  else S.chats.unshift({ id: conv.id, title: conv.title, updated: Date.now() / 1000, count: conv.messages.length, report: conv.report });
+  clearTimeout(conv.timer);
+  conv.timer = setTimeout(() => api("/api/chats/save", { body: { id: conv.id, title: conv.title, report: conv.report,
+    messages: conv.messages.map(({ typing, ...m }) => m) } }).catch(e => toast("❌ Conversation non enregistrée : " + e.message)), 400);
+}
+async function loadChats() { try { S.chats = (await api("/api/chats")).chats; } catch { S.chats ||= []; } }
+async function initChats() {
+  const legacy = store.get("pvehub.chat", []);  // ancienne conversation gardée sur ce téléphone : elle rejoint l'historique
+  if (legacy.length) { saveChat({ id: null, title: "", messages: legacy }); store.set("pvehub.chat", []); }
+  await loadChats();
+  const id = store.get("pvehub.chatId", null);
+  if (id && S.chats.some(c => c.id === id)) await openConv(id, true);
+}
+async function openConv(id, quiet) {
+  if (S.busy) return toast("Attends la fin de la réponse de Hermes");
+  try { const c = await api("/api/chats/get?" + qs({ id })); setConv(c); if (!quiet) setView("chat"); }
+  catch (e) { if (!quiet) toast("❌ " + e.message); }
+}
+function newConv() {
+  if (S.busy) return toast("Attends la fin de la réponse de Hermes");
+  setConv({ id: null, title: "", messages: [] }); $("#prompt").focus();
+}
+async function deleteConv(id) {
+  try { await api("/api/chats/delete", { body: { id } }); } catch (e) { return toast("❌ " + e.message); }
+  S.chats = S.chats.filter(c => c.id !== id);
+  if (S.conv.id === id) setConv({ id: null, title: "", messages: [] });
+}
+function openChats() {
+  S.cOpen = true; S.cEdit = false; S.cQ = ""; $("#chats").scrollTop = 0; $("#chats").classList.add("open"); history.pushState({ c: 1 }, "");
+  renderChats(); loadChats().then(() => S.cOpen && renderChats());
+}
+function closeChats() { S.cOpen = false; $("#chats").classList.remove("open"); }
+function renderChats() {
+  const q = S.cQ.toLowerCase(), list = (S.chats || []).filter(c => !q || c.title.toLowerCase().includes(q));
+  let h = `<div class="navbar" id="cnav"><div class="nt">Conversations</div>
+      <div class="side"><button class="navbtn" onclick="history.back()">${I.back}Hermes</button></div>
+      <div class="side r"><button class="navbtn" id="cEdit">${S.cEdit ? "<b>OK</b>" : "Modifier"}</button></div></div>
+    <h1 class="large">Conversations</h1>
+    <div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="cQ" type="search" placeholder="Rechercher" value="${esc(S.cQ)}" aria-label="Rechercher une conversation"></div>
+    <div class="group"><button class="cell icon tap act" id="cNew">${icoBox(I.compose, "accent")}<div class="body">Nouvelle conversation</div></button></div>`;
+  if (!list.length) h += `<div class="empty">${q ? "Aucun résultat." : "Aucune conversation pour l'instant."}</div>`;
+  let day = null;
+  for (const c of list) {
+    const d = dayLabel(c.updated);
+    if (d !== day) { h += `${day ? "</div>" : ""}<div class="hdr">${esc(d)}</div><div class="group">`; day = d; }
+    const cur = c.id === S.conv.id;
+    h += `<div class="cell ${S.cEdit ? "" : "tap"}" data-conv="${esc(c.id)}"><div class="body"><div class="t ell">${c.report ? "☀️ " : ""}${esc(c.title || "Conversation")}</div>
+      <div class="s">${c.count} message${c.count > 1 ? "s" : ""} · ${new Date(c.updated * 1000).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}${cur ? " · en cours" : ""}</div></div>
+      ${S.cEdit ? `<button class="navbtn" data-del="${esc(c.id)}" aria-label="Supprimer" style="color:var(--red)">${I.trash}</button>` : I.chev}</div>`;
+  }
+  if (day) h += "</div>";
+  h += `<div class="ftr">Les conversations sont gardées sur le serveur : tu les retrouves sur tous tes appareils. Les 100 plus récentes sont conservées.</div><div style="height:calc(40px + env(safe-area-inset-bottom))"></div>`;
+  const focus = document.activeElement?.id === "cQ";
+  $("#chats").innerHTML = h;
+  if (focus) { const i = $("#cQ"); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }
+}
+$("#chats").addEventListener("input", e => { if (e.target.id === "cQ") { S.cQ = e.target.value; renderChats(); } });
+$("#chats").addEventListener("click", async e => {
+  if (e.target.closest("#cEdit")) { S.cEdit = !S.cEdit; return renderChats(); }
+  if (e.target.closest("#cNew")) { newConv(); return history.back(); }
+  const del = e.target.closest("[data-del]");
+  if (del) {
+    const c = S.chats.find(x => x.id === del.dataset.del);
+    if (await confirmBox("Supprimer la conversation ?", esc(c?.title || ""), "Supprimer", true)) { await deleteConv(del.dataset.del); renderChats(); }
+    return;
+  }
+  const row = e.target.closest("[data-conv]");
+  if (row && !S.cEdit) { await openConv(row.dataset.conv); if (S.conv.id === row.dataset.conv) history.back(); }
+});
 function addNote(text) { S.pending.push("[PVE Hub] " + text); S.chat.push({ role: "note", content: text }); }
 $("#chat").onclick = async e => {
-  if (e.target.id === "clearChat") { if (await confirmBox("Nouvelle conversation", "L'historique sur ce téléphone sera effacé.", "Effacer", true)) { S.chat = []; S.pending = []; saveChat(); renderChat(); } return; }
+  if (e.target.id === "clearChat") return newConv();  // l'ancienne reste dans l'historique
   if (e.target.dataset.ex) { $("#prompt").value = e.target.dataset.ex; return send(); }
   const ab = e.target.closest("[data-ap]");
   if (ab) {
@@ -1645,7 +1740,8 @@ async function send() {
   const text = $("#prompt").value.trim(); if (!text || S.busy) return;
   $("#prompt").value = ""; $("#prompt").style.height = "36px";
   const content = (S.pending.length ? S.pending.join("\n") + "\n\n" : "") + text; S.pending = [];
-  S.chat.push({ role: "user", content: text, sent: content });
+  const conv = S.conv;
+  S.chat.push({ role: "user", content: text, sent: content }); saveChat(conv);  // la question est gardée même si l'app se ferme
   const reply = { role: "assistant", content: "", tools: [], approvals: [], typing: true }; S.chat.push(reply);
   S.busy = true; $("#sendBtn").disabled = true; renderChat(); scrollChat();
   const history = S.chat.filter(m => m !== reply && (m.role === "user" || m.role === "assistant") && (m.content || m.sent))
@@ -1682,7 +1778,7 @@ async function send() {
   } catch (e) {
     reply.content += (reply.content ? "\n\n" : "") + "⚠️ " + e.message;
   }
-  reply.typing = false; S.busy = false; $("#sendBtn").disabled = false; paint(true); saveChat();
+  reply.typing = false; S.busy = false; $("#sendBtn").disabled = false; paint(true); saveChat(conv);
   autoRun(reply);
 }
 
@@ -1720,6 +1816,7 @@ async function start() {
   $("#login").classList.add("hide"); $("#app").classList.remove("hide");
   setView(S.view); loop();
   if ("serviceWorker" in navigator && window.isSecureContext) navigator.serviceWorker.register("/sw.js").catch(() => {});
+  await initChats();
   openFromHash(); addEventListener("hashchange", openFromHash);
   checkVersion(); loadMaint(); setInterval(() => document.visibilityState === "visible" && loadMaint(), 300000);
   setInterval(() => document.visibilityState === "visible" && checkVersion(), 3600000);  // lit le cache du serveur, GitHub n'est interrogé qu'une fois par semaine
