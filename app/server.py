@@ -1066,7 +1066,7 @@ def send_push(title, body, url="/", tag=None):
     return ok
 
 
-ALERT_DEFAULTS = {"stopped": True, "disk": True, "disk_threshold": 90, "backup": True, "updates": True, "apps": True,
+ALERT_DEFAULTS = {"stopped": True, "disk": True, "disk_threshold": 90, "backup": True, "updates": True, "apps": True, "smart": True,
                   "report": False, "report_time": "08:00", "tz": os.environ.get("TZ") or "UTC"}
 REPORTS_FILE = os.path.join(DATA_DIR, "reports.json")  # derniers rapports du matin
 
@@ -1128,7 +1128,7 @@ def r_push_test(_):
 
 def r_alert_settings(d):
     s = alert_settings()
-    for k in ("stopped", "disk", "backup", "updates", "report", "apps"):
+    for k in ("stopped", "disk", "backup", "updates", "report", "apps", "smart"):
         if k in d:
             s[k] = bool(d[k])
     if "report_time" in d:
@@ -1236,6 +1236,76 @@ def check_apps(prev, apps):
     return alerts, back
 
 
+# ---------------------------------------------------------------- santé des disques physiques (SMART, via l'API Proxmox)
+TEMP_MAX = {"hdd": 55}  # au-delà : alerte ; SSD et NVMe supportent plus chaud
+TEMP_MAX_DEFAULT = 70
+
+
+def parse_smart_temp(sm):
+    """Température (°C) depuis /disks/smart : attribut 194/190 (SATA) ou ligne « Temperature: N Celsius » (NVMe)."""
+    for a in sm.get("attributes") or []:
+        if str(a.get("id")) in ("194", "190") or "temperature" in str(a.get("name", "")).lower():
+            m = re.match(r"\d+", str(a.get("raw", "")).strip())
+            if m:
+                return int(m.group())
+    m = re.search(r"Temperature:\s+(\d+)\s*Celsius", sm.get("text") or "")
+    return int(m.group(1)) if m else None
+
+
+def node_disks(node):
+    disks = [{"node": node, "dev": d.get("devpath", ""), "model": (d.get("model") or d.get("vendor") or "Disque").strip(),
+              "size": d.get("size", 0), "type": d.get("type") or "unknown", "health": str(d.get("health") or "UNKNOWN").upper(),
+              "wearout": d["wearout"] if isinstance(d.get("wearout"), (int, float)) else None, "used": d.get("used") or ""}
+             for d in pve("GET", f"/nodes/{node}/disks/list") or [] if d.get("devpath")]
+
+    def temp(d):
+        try:
+            return parse_smart_temp(pve("GET", f"/nodes/{node}/disks/smart", {"disk": d["dev"]}, timeout=20) or {})
+        except ApiError:
+            return None
+    with ThreadPoolExecutor(4) as ex:
+        for d, t in zip(disks, ex.map(temp, disks)):
+            d["temp"] = t
+    return disks
+
+
+def r_disks(_):
+    out, errors = [], []
+    for n in pve("GET", "/nodes") or []:
+        if n.get("status") == "online":
+            try:
+                out += node_disks(n["node"])
+            except ApiError as e:
+                errors.append(f"{n['node']} : {e.msg}")
+    return {"disks": out, "error": "; ".join(errors) or None, "limits": {**TEMP_MAX, "other": TEMP_MAX_DEFAULT}}
+
+
+def disk_problems(d):
+    """Liste des problèmes d'un disque (vide si tout va bien). wearout = % d'usure (SSD), comme dans Proxmox."""
+    p = []
+    if d["health"] not in ("PASSED", "OK", "UNKNOWN", ""):
+        p.append(f"état SMART « {d['health']} »")
+    if d.get("wearout") is not None and d["wearout"] >= 90:
+        p.append(f"usé à {d['wearout']:.0f} %")
+    lim = TEMP_MAX.get(d["type"], TEMP_MAX_DEFAULT)
+    if d.get("temp") is not None and d["temp"] >= lim:
+        p.append(f"{d['temp']} °C (max conseillé {lim} °C)")
+    return p
+
+
+def check_disks(disks, alerted, now):
+    """Une alerte par disque en difficulté, rappel au plus une fois par jour ; réarmée quand il va mieux."""
+    alerts = []
+    for d in disks:
+        key, p = f"{d['node']}:{d['dev']}", disk_problems(d)
+        if not p:
+            alerted.pop(key, None)
+        elif now - alerted.get(key, 0) > 86400:
+            alerted[key] = now
+            alerts.append(("Santé d'un disque", f"{d['model']} ({d['dev']}) : {', '.join(p)}. Pense à sauvegarder.", "/#maint"))
+    return alerts
+
+
 def disk_items(nodes, storages, guests):
     items = [(f"node:{n['node']}", f"Le disque système de {n['node']}", n.get("disk", 0), n.get("maxdisk", 0)) for n in nodes]
     items += [(f"st:{s['node']}:{s['storage']}", f"Le stockage {s['storage']}", s.get("disk", 0), s.get("maxdisk", 0))
@@ -1282,6 +1352,13 @@ def monitor_once(ctx):
             alerts += a
             for name in back:
                 log_event("alert", f"{name} répond à nouveau", url="/#apps")
+        except ApiError:
+            pass
+    # disques physiques : toutes les 6 h (interroger SMART trop souvent réveille les disques en veille)
+    if s["smart"] and now - state.get("smart_at", 0) >= 6 * 3600:
+        state["smart_at"] = now
+        try:
+            alerts += check_disks(r_disks({})["disks"], state.setdefault("smart", {}), now)
         except ApiError:
             pass
     a, state["failed_end"] = check_failed_backups(tasks, state.get("failed_end", now))
@@ -1659,6 +1736,15 @@ def report_facts():
                 facts.append(f"{label} : {100 * used / total:.0f} % utilisé")
                 if 100 * used / total >= s["disk_threshold"]:
                     issues.append(f"{label[0].lower() + label[1:]} plein à {100 * used / total:.0f} %")
+    except ApiError:
+        pass
+    try:
+        for d in r_disks({})["disks"]:
+            p = disk_problems(d)
+            facts.append(f"Disque {d['model']} ({d['dev']}) : {'; '.join(p) if p else 'OK'}"
+                         + (f", {d['temp']} °C" if d.get("temp") is not None else ""))
+            if p:
+                issues.append(f"disque {d['model']} : {', '.join(p)}")
     except ApiError:
         pass
     cts = [c for c in _updates["cts"].values() if c["packages"]]
@@ -2192,6 +2278,7 @@ def r_tasks(q):
 ROUTES = {
     ("POST", "/api/store/uninstall"): r_store_uninstall,
     ("GET", "/api/events"): r_events,
+    ("GET", "/api/disks"): r_disks,
     ("POST", "/api/settings"): r_app_settings,
     ("GET", "/api/chats"): r_chats,
     ("GET", "/api/chats/get"): r_chat_get,

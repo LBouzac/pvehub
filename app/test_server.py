@@ -296,4 +296,16 @@ for bad in ({"cores": 0}, {"memory": "x"}, {"disk_grow": 99999}, {}):
         srv.r_guest_config({"node": "pve", "type": "lxc", "vmid": 101, **bad}); raise AssertionError(bad)
     except srv.ApiError:
         pass
+# santé des disques : température SATA / NVMe, problèmes, alerte une fois par jour
+assert srv.parse_smart_temp({"attributes": [{"id": 194, "name": "Temperature_Celsius", "raw": "38 (Min/Max 20/45)"}]}) == 38
+assert srv.parse_smart_temp({"type": "text", "text": "Critical Warning: 0x00\nTemperature:                        41 Celsius\n"}) == 41
+assert srv.parse_smart_temp({}) is None
+D = lambda **k: {"node": "pve", "dev": "/dev/sda", "model": "WD Red", "type": "hdd", "health": "PASSED", "wearout": None, "temp": 40, **k}
+assert srv.disk_problems(D()) == [] and srv.disk_problems(D(health="UNKNOWN")) == []
+assert len(srv.disk_problems(D(health="FAILED", temp=58))) == 2           # HDD : 55 °C max
+assert srv.disk_problems(D(type="nvme", temp=58)) == [] and srv.disk_problems(D(type="ssd", wearout=92))
+al = {}
+assert len(srv.check_disks([D(health="FAILED")], al, NOW)) == 1
+assert srv.check_disks([D(health="FAILED")], al, NOW + 3600) == []         # pas de répétition dans la journée
+assert srv.check_disks([D()], al, NOW + 7200) == [] and al == {}           # réparé : réarmé
 print("ok")

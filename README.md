@@ -30,7 +30,7 @@ Petite app web pour piloter ton Proxmox depuis le téléphone, avec l'agent IA H
   à jour, mise à jour d'un conteneur ou d'une VM (avec l'agent QEMU) en un tap, avec un snapshot pris juste avant
 - **Hermes** : il connaît l'état du serveur et peut proposer des actions que tu valides d'un tap ; il te demande
   l'autorisation avant ses commandes sensibles
-- **Notifications** sur le téléphone : machine arrêtée toute seule, app qui ne répond plus, disque plein, sauvegarde en échec ou en retard,
+- **Notifications** sur le téléphone : machine arrêtée toute seule, app qui ne répond plus, disque plein, disque en panne ou trop chaud, sauvegarde en échec ou en retard,
   résumé hebdomadaire des mises à jour
 - **Rapport du matin** : chaque jour à l'heure choisie, Hermes résume l'état du serveur en une notification ;
   un tap l'ouvre dans la conversation pour lui répondre
@@ -218,6 +218,9 @@ Les notifications ont besoin de l'adresse HTTPS (Tailscale, ci-dessus). Sur iPho
      alors que sa machine tourne. Vérifié toutes les 5 minutes, alerte après deux échecs de suite ; son retour est
      noté dans le Journal ;
    - **Disque ou stockage plein** : au-delà du seuil choisi (80 à 95 %), rappel au plus une fois par jour ;
+   - **Santé des disques** : état SMART des disques physiques lu par Proxmox, toutes les 6 heures. Alerte si un disque
+     est en panne, si un SSD est usé à 90 % ou plus, ou s'il chauffe (55 °C pour un disque dur, 70 °C pour un SSD).
+     Le détail (modèle, usure, température) est dans **Maintenance → Disques** ;
    - **Sauvegardes** : une sauvegarde en échec, et chaque matin les machines incluses dans une sauvegarde planifiée
      mais pas sauvegardées depuis 7 jours ;
    - **Résumé des mises à jour** : une fois par semaine, en matinée.

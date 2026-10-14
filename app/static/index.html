@@ -1222,7 +1222,10 @@ function scheduleFr(s) {  // format calendrier de Proxmox : « 01:00 », « sun 
   return s || "Planification inconnue";
 }
 async function loadMaint(refresh) {
-  const [b, u] = await Promise.allSettled([api("/api/maint/backups"), api("/api/maint/updates" + (refresh ? "?refresh=1" : ""))]);
+  const [b, u, dk] = await Promise.allSettled([api("/api/maint/backups"), api("/api/maint/updates" + (refresh ? "?refresh=1" : "")),
+    S.mD && !refresh && Date.now() - S.mDAt < 300000 ? Promise.resolve(S.mD) : api("/api/disks")]);  // SMART : pas plus d'une fois toutes les 5 min
+  if (dk.status === "fulfilled" && dk.value !== S.mD) S.mDAt = Date.now();
+  S.mD = dk.status === "fulfilled" ? dk.value : { error: dk.reason.message, disks: [] };
   S.mB = b.status === "fulfilled" ? b.value : { error: b.reason.message };
   S.mU = u.status === "fulfilled" ? u.value : { error: u.reason.message };
   S.mAt = Date.now();
@@ -1234,6 +1237,12 @@ async function loadMaint(refresh) {
   clearTimeout(S.mPoll);  // pendant la recherche des mises à jour : on repasse toutes les 3 s
   if ((S.mU.scanning || busy) && S.maintOpen) S.mPoll = setTimeout(() => loadMaint(), 3000);
 }
+// même règle que le serveur (disk_problems) : panne SMART, usure ≥ 90 %, trop chaud
+function diskState(d) {
+  const lim = S.mD?.limits?.[d.type] ?? S.mD?.limits?.other ?? 70, failed = !["PASSED", "OK", "UNKNOWN", ""].includes(d.health);
+  const hot = d.temp != null && d.temp >= lim, worn = d.wearout != null && d.wearout >= 90;
+  return { failed, hot, worn, bad: failed || hot || worn };
+}
 const ctsToUpdate = () => (S.mU?.cts || []).filter(c => c.packages.length);
 function maintSummary() {
   if (!S.mB && !S.mU) return "Sauvegardes et mises à jour";
@@ -1242,6 +1251,8 @@ function maintSummary() {
   if (late) parts.push(`${late} machine${late > 1 ? "s" : ""} sans sauvegarde récente`);
   if (S.mB?.failed?.length) parts.push("sauvegarde en échec");
   if (upd) parts.push(`${upd} machine${upd > 1 ? "s" : ""} à mettre à jour`);
+  const dbad = (S.mD?.disks || []).filter(d => diskState(d).bad).length;
+  if (dbad) parts.push(`${dbad} disque${dbad > 1 ? "s" : ""} à surveiller`);
   if (S.mU?.scanning && !upd) parts.push("recherche des mises à jour…");
   return parts.length ? parts.join(" · ").replace(/^./, c => c.toUpperCase()) : "Tout est à jour ✓";
 }
@@ -1279,6 +1290,20 @@ function renderMaint() {
       <div class="s">${g.last ? `${ago(g.last.ctime)} · ${fb(g.last.size)} · ${esc(g.last.storage)}` : "Jamais sauvegardée"}</div></div>
       ${g.planned ? "" : '<span class="pill">non planifiée</span>'}${I.chev}</button>`; }).join("") || `<div class="cell"><div class="body mute">Aucune machine</div></div>`;
   h += `</div><div class="ftr">Vert : moins de 7 jours. Orange : plus ancienne. Rouge : aucune. Touche une machine pour la sauvegarder maintenant.</div>`;
+  // --- disques physiques
+  h += `<div class="hdr">Disques</div><div class="group">`;
+  const DK = S.mD;
+  if (!DK) h += load;
+  else if (DK.error && !DK.disks.length) h += `<div class="cell"><div class="body mute">${esc(DK.error)}</div></div>`;
+  else if (!DK.disks.length) h += `<div class="cell"><div class="body mute">Aucun disque trouvé</div></div>`;
+  else h += DK.disks.map(d => {
+    const { failed, hot, bad } = diskState(d);
+    const sub = [esc(d.dev), fb(d.size), d.type === "unknown" ? "" : d.type.toUpperCase(), d.wearout != null ? `usure ${Math.round(d.wearout)} %` : "",
+      d.temp != null ? `<span style="${hot ? "color:var(--red)" : ""}">${d.temp} °C</span>` : ""].filter(Boolean).join(" · ");
+    return `<div class="cell icon">${icoBox(I.disk, bad ? "red" : d.health === "UNKNOWN" ? "gray" : "green")}<div class="body"><div class="t ell">${esc(d.model)}${S.mD.disks.some(x => x.node !== d.node) ? ` <span class="mute" style="font-size:13px">${esc(d.node)}</span>` : ""}</div>
+      <div class="s">${sub}</div></div><span class="pill" style="${bad ? "background:var(--red);color:#fff" : ""}">${failed ? "En panne" : bad ? "À surveiller" : d.health === "UNKNOWN" ? "Inconnu" : "OK"}</span></div>`;
+  }).join("");
+  h += `</div><div class="ftr">État SMART lu par Proxmox. L'usure concerne les SSD (100 % = fin de vie annoncée). Alerte si un disque est en panne, usé à 90 % ou trop chaud.</div>`;
   // --- mises à jour
   h += `<div class="hdr"><span class="grow">Mises à jour</span></div><div class="group">`;
   if (!U) h += load;
@@ -1301,7 +1326,7 @@ function renderMaint() {
   h += `</div><div class="ftr">${U?.checked_at ? `Vérifié ${ago(U.checked_at)}. ` : ""}Un snapshot est pris avant chaque mise à jour pour pouvoir revenir en arrière. Pour une VM, l'agent QEMU doit être installé et actif (qemu-guest-agent).</div>
     <div style="height:calc(40px + env(safe-area-inset-bottom))"></div>`;
   $("#maint").innerHTML = h; $("#maint").scrollTop = sc;
-  $("#mRefresh").onclick = () => { S.mB = null; S.mU = { scanning: true, cts: [] }; renderMaint(); loadMaint(true); };
+  $("#mRefresh").onclick = () => { S.mB = S.mD = null; S.mU = { scanning: true, cts: [] }; renderMaint(); loadMaint(true); };
 }
 $("#maint").addEventListener("scroll", () => $("#mnav")?.classList.toggle("scrolled", $("#maint").scrollTop > 30), { passive: true });
 function showPackages(title, pkgs) {
@@ -1420,6 +1445,7 @@ function notifHtml() {
     ${sw("stopped", "Machine arrêtée", "Sans qu'aucun arrêt n'ait été demandé")}
     ${sw("apps", "App hors ligne", "Une app de l'onglet Apps ne répond plus")}
     ${sw("disk", "Disque ou stockage plein")}
+    ${sw("smart", "Santé des disques", "Panne SMART, usure ou température")}
     ${s.disk ? `<label class="cell"><div class="body">Seuil</div><select class="picker" data-alert="disk_threshold" style="direction:ltr;text-align-last:right">${[80, 85, 90, 95].map(v => `<option value="${v}" ${s.disk_threshold == v ? "selected" : ""}>${v} %</option>`).join("")}</select>${I.chev}</label>` : ""}
     ${sw("backup", "Sauvegardes", "Échec, ou machine non sauvegardée depuis 7 jours")}
     ${sw("updates", "Résumé des mises à jour", "Une fois par semaine")}
