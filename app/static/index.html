@@ -55,6 +55,8 @@ matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;background:var(--bg);color:var(--label);font:17px/1.3 var(--font);letter-spacing:-.01em;-webkit-font-smoothing:antialiased}
 body{overscroll-behavior-y:none}
+html{touch-action:manipulation}
+input,select,textarea{font-size:max(16px,1em)}
 button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;padding:0;letter-spacing:inherit}
 input,textarea,select{font:inherit;color:var(--label);letter-spacing:inherit}
 .hide{display:none!important}
@@ -173,7 +175,7 @@ canvas{width:100%;height:120px;display:block}
 .alert .ab{padding:19px 16px 15px}
 .alert h3{margin:0 0 4px;font-size:17px;font-weight:600}
 .alert p{margin:0 0 10px;font-size:13px}
-.alert input,.alert select{width:100%;margin-top:8px;padding:7px 8px;font-size:15px;border:.5px solid var(--sep);border-radius:7px;background:var(--card);outline:0}
+.alert input,.alert select{width:100%;margin-top:8px;padding:7px 8px;font-size:16px;border:.5px solid var(--sep);border-radius:7px;background:var(--card);outline:0}
 .alert .af{display:block;text-align:left;font-size:13px;color:var(--label2);margin-top:10px}.alert .af input{margin-top:3px;color:var(--label)}
 .alert .abtns{display:flex;border-top:.5px solid var(--sep)}
 .alert .abtns button{flex:1;height:44px;color:var(--accent);font-size:17px}
@@ -236,7 +238,7 @@ canvas{width:100%;height:120px;display:block}
 @keyframes drop{from{transform:translateY(-120%)}}
 
 /* commandes */
-.term{display:block;width:100%;min-height:88px;resize:none;border:0;outline:0;background:none;padding:12px 16px;font:15px/1.4 var(--mono);color:var(--label)}
+.term{display:block;width:100%;min-height:88px;resize:none;border:0;outline:0;background:none;padding:12px 16px;font:16px/1.4 var(--mono);color:var(--label)}
 .picker{appearance:none;-webkit-appearance:none;border:0;background:none;outline:0;color:var(--label2);font-size:17px;text-align:right;direction:rtl;max-width:60%;padding:0}
 .chips{display:flex;gap:8px;overflow-x:auto;padding:0 16px 4px;scrollbar-width:none}
 .chips::-webkit-scrollbar{display:none}
