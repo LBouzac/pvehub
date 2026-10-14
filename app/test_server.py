@@ -46,6 +46,11 @@ assert srv.is_up(_fake_tcp(b"")) is None or srv.is_up(_fake_tcp(b"")) is False
 assert srv.is_up(_fake_tcp(b"HTTP/1.0 401 Unauthorized\r\n\r\n")) is True
 assert srv.is_up("http://127.0.0.1:1") is False
 
+# sauvegardes planifiées : quelle machine est couverte par quel job
+assert srv.job_covers({"all": 1, "exclude": "104,105"}, 101) and not srv.job_covers({"all": 1, "exclude": "104,105"}, 104)
+assert srv.job_covers({"vmid": "100,101"}, 101) and not srv.job_covers({"vmid": "100,1010"}, 101)
+assert not srv.job_covers({"all": 1, "enabled": 0}, 101)
+
 # crontab : tâches actives/désactivées, commentaires et variables conservés
 CRON = """# m h  dom mon dow   command
 SHELL=/bin/bash

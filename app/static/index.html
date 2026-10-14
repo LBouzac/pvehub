@@ -320,7 +320,8 @@ canvas{width:100%;height:120px;display:block}
   </nav>
 </div>
 
-<div class="push" id="sheet"></div>
+<div class="push" id="maint"></div>
+<div class="push" id="sheet" style="z-index:35"></div>
 <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
 
 <script>
@@ -499,6 +500,8 @@ function renderDash() {
       <div class="tile"><div class="k" style="color:var(--blue)">${I.mem}Mémoire</div><div class="n">${pct(mem, maxmem).toFixed(0)}<small> %</small></div>${bar(pct(mem, maxmem))}</div>
       <div class="tile"><div class="k" style="color:var(--purple)">${I.disk}Stockage</div><div class="n">${st.length ? pct(st.reduce((a, s) => a + s.disk, 0), st.reduce((a, s) => a + s.maxdisk, 0)).toFixed(0) : "–"}<small> %</small></div>${st.length ? bar(pct(st.reduce((a, s) => a + s.disk, 0), st.reduce((a, s) => a + s.maxdisk, 0))) : ""}</div>
     </div>`;
+  h += `<div class="group" style="margin-top:14px"><button class="cell icon tap" id="maintBtn">${icoBox(I.wrench.replace(/width="12" height="12"/, ""), "orange")}
+    <div class="body"><div class="t">Maintenance</div><div class="s">${esc(maintSummary())}</div></div>${maintAlert() ? '<span class="dot" style="background:var(--orange)"></span>' : ""}${I.chev}</button></div>`;
   for (const n of nodes) {
     const c = (n.cpu || 0) * 100;
     h += `<div class="hdr"><span class="grow">Nœud ${esc(n.node)}</span></div><div class="group">
@@ -512,6 +515,7 @@ function renderDash() {
   if (st.length) h += `<div class="hdr">Stockage</div><div class="group">` + st.map(s =>
     `<div class="cell"><div class="body"><div class="row"><span class="grow">${esc(s.storage)}${nodes.length > 1 ? ` <span class="mute">· ${esc(s.node)}</span>` : ""}</span><span class="mute">${fb(s.disk)} / ${fb(s.maxdisk)}</span></div>${bar(pct(s.disk, s.maxdisk))}</div></div>`).join("") + `</div>`;
   $("#v-dash").innerHTML = h;
+  $("#maintBtn").onclick = openMaint;
   $("#updBanner") && ($("#updBanner").onclick = () => S.ver.can_update ? doUpdate() : openSettings());
   loadNodeCharts();
 }
@@ -554,7 +558,7 @@ function openGuest(id) {
   renderGuest(); loadGuestExtras();
 }
 function closeGuest() { S.guest = null; $("#sheet").classList.remove("open"); }
-addEventListener("popstate", () => { if (S.guest) closeGuest(); });
+addEventListener("popstate", () => { if (S.guest) closeGuest(); else if (S.maintOpen) closeMaint(); });
 
 function renderGuest() {
   const g = findGuest(S.guest); if (!g) return;
@@ -931,6 +935,150 @@ function renderExecLog() {
 }
 
 // ---------- autorisations Hermes
+// ---------- maintenance : sauvegardes + mises à jour des conteneurs
+const ago = ts => { const s = Date.now() / 1000 - ts; return s < 3600 ? `il y a ${Math.max(1, Math.round(s / 60))} min` : s < 86400 ? `il y a ${Math.round(s / 3600)} h` : `il y a ${Math.round(s / 86400)} j`; };
+const bkState = g => !g.last ? "none" : Date.now() / 1000 - g.last.ctime > 7 * 86400 ? "old" : "ok";
+const DOW_PVE = { mon: "lundi", tue: "mardi", wed: "mercredi", thu: "jeudi", fri: "vendredi", sat: "samedi", sun: "dimanche" };
+function scheduleFr(s) {  // format calendrier de Proxmox : « 01:00 », « sun 02:00 », « mon..fri 21:00 »…
+  s = String(s || "").trim(); let m;
+  if ((m = s.match(/^(\d{1,2}):(\d{2})$/))) return `Tous les jours à ${m[1].padStart(2, "0")}:${m[2]}`;
+  if ((m = s.match(/^([a-z]{3})\.\.([a-z]{3}) (\d{1,2}):(\d{2})$/)) && DOW_PVE[m[1]] && DOW_PVE[m[2]]) return `Du ${DOW_PVE[m[1]]} au ${DOW_PVE[m[2]]} à ${m[3].padStart(2, "0")}:${m[4]}`;
+  if ((m = s.match(/^([a-z,]+) (\d{1,2}):(\d{2})$/)) && m[1].split(",").every(d => DOW_PVE[d])) return `Le ${m[1].split(",").map(d => DOW_PVE[d]).join(", ").replace(/, ([^,]*)$/, " et $1")} à ${m[2].padStart(2, "0")}:${m[3]}`;
+  return s || "Planification inconnue";
+}
+async function loadMaint(refresh) {
+  const [b, u] = await Promise.allSettled([api("/api/maint/backups"), api("/api/maint/updates" + (refresh ? "?refresh=1" : ""))]);
+  S.mB = b.status === "fulfilled" ? b.value : { error: b.reason.message };
+  S.mU = u.status === "fulfilled" ? u.value : { error: u.reason.message };
+  S.mAt = Date.now();
+  S.mJobs = S.mJobs || {};  // après un rechargement de page : on retrouve les mises à jour lancées côté serveur
+  for (const j of Object.values(S.mU.jobs || {})) if (!S.mJobs[j.vmid] || S.mJobs[j.vmid].at <= j.at) S.mJobs[j.vmid] = j;
+  const busy = Object.values(S.mJobs).some(j => ["start", "snapshot", "upgrade"].includes(j.status));
+  if (S.view === "dash" && $("#maintBtn")) renderDash();
+  if (S.maintOpen) renderMaint();
+  clearTimeout(S.mPoll);  // pendant la recherche des mises à jour : on repasse toutes les 3 s
+  if ((S.mU.scanning || busy) && S.maintOpen) S.mPoll = setTimeout(() => loadMaint(), 3000);
+}
+const ctsToUpdate = () => (S.mU?.cts || []).filter(c => c.packages.length);
+function maintSummary() {
+  if (!S.mB && !S.mU) return "Sauvegardes et mises à jour";
+  const parts = [], late = (S.mB?.guests || []).filter(g => bkState(g) !== "ok").length, upd = ctsToUpdate().length + (S.mU?.host?.packages?.length ? 1 : 0);
+  if (S.mB && !S.mB.error && !S.mB.jobs.length) parts.push("aucune sauvegarde planifiée");
+  if (late) parts.push(`${late} machine${late > 1 ? "s" : ""} sans sauvegarde récente`);
+  if (S.mB?.failed?.length) parts.push("sauvegarde en échec");
+  if (upd) parts.push(`${upd} machine${upd > 1 ? "s" : ""} à mettre à jour`);
+  if (S.mU?.scanning && !upd) parts.push("recherche des mises à jour…");
+  return parts.length ? parts.join(" · ").replace(/^./, c => c.toUpperCase()) : "Tout est à jour ✓";
+}
+const maintAlert = () => maintSummary() !== "Tout est à jour ✓" && !!(S.mB || S.mU) && !/^Recherche/.test(maintSummary());
+function openMaint() {
+  S.maintOpen = true; $("#maint").scrollTop = 0; $("#maint").classList.add("open"); history.pushState({ m: 1 }, "");
+  renderMaint(); loadMaint();
+}
+function closeMaint() { S.maintOpen = false; $("#maint").classList.remove("open"); clearTimeout(S.mPoll); }
+function renderMaint() {
+  const B = S.mB, U = S.mU, jobs = S.mJobs || {}, sc = $("#maint").scrollTop;
+  const load = `<div class="cell"><div class="body mute">Chargement…</div></div>`;
+  let h = `<div class="navbar ${sc > 30 ? "scrolled" : ""}" id="mnav"><div class="nt">Maintenance</div>
+      <div class="side"><button class="navbtn" onclick="history.back()">${I.back}Serveur</button></div>
+      <div class="side r"><button class="navbtn" id="mRefresh">Actualiser</button></div></div>
+    <h1 class="large">Maintenance</h1>`;
+  // --- sauvegardes
+  h += `<div class="hdr">Sauvegardes planifiées</div><div class="group">`;
+  if (!B) h += load;
+  else if (B.error) h += `<div class="cell"><div class="body mute">${esc(B.error)}</div></div>`;
+  else {
+    h += B.jobs.length ? B.jobs.map(j => `<div class="cell icon">${icoBox(I.backup, j.enabled ? "green" : "gray")}<div class="body">
+        <div class="t">${esc(scheduleFr(j.schedule))}${j.enabled ? "" : ' <span class="pill">désactivée</span>'}</div>
+        <div class="s">${j.all ? "Toutes les machines" : "Machines " + esc(String(j.vmid || "").replace(/,/g, ", "))} → ${esc(j.storage || "?")}${j.comment ? " · " + esc(j.comment) : ""}</div></div></div>`).join("")
+      : `<div class="cell icon">${icoBox(I.backup, "red")}<div class="body"><div class="t">Aucune sauvegarde planifiée</div>
+        <div class="s" style="line-height:1.35">Crée-en une dans l'interface Proxmox : Datacenter → Sauvegarde → Ajouter.</div></div></div>`;
+    h += B.failed.map(f => `<div class="cell icon">${icoBox(I.kill, "red")}<div class="body"><div class="t" style="color:var(--red)">Échec ${when(f.starttime)}</div>
+        <div class="s">${f.vmid ? "Machine " + esc(f.vmid) + " · " : ""}${esc(f.status)}</div></div></div>`).join("");
+  }
+  h += `</div><div class="hdr">Dernière sauvegarde</div><div class="group">`;
+  if (!B) h += load;
+  else if (!B.error) h += B.guests.map(g => { const st = bkState(g);
+    return `<button class="cell tap" data-g="${esc(g.id)}"><span class="dot" style="background:var(--${st === "ok" ? "green" : st === "old" ? "orange" : "red"})"></span>
+      <div class="body"><div class="t ell">${esc(g.name || g.vmid)} <span class="mute" style="font-size:13px">${kind(g.type)} ${g.vmid}</span></div>
+      <div class="s">${g.last ? `${ago(g.last.ctime)} · ${fb(g.last.size)} · ${esc(g.last.storage)}` : "Jamais sauvegardée"}</div></div>
+      ${g.planned ? "" : '<span class="pill">non planifiée</span>'}${I.chev}</button>`; }).join("") || `<div class="cell"><div class="body mute">Aucune machine</div></div>`;
+  h += `</div><div class="ftr">Vert : moins de 7 jours. Orange : plus ancienne. Rouge : aucune. Touche une machine pour la sauvegarder maintenant.</div>`;
+  // --- mises à jour
+  h += `<div class="hdr"><span class="grow">Mises à jour</span></div><div class="group">`;
+  if (!U) h += load;
+  else if (U.error && !U.cts) h += `<div class="cell"><div class="body mute">${esc(U.error)}</div></div>`;
+  else {
+    if (U.scanning) h += `<div class="cell"><div class="body mute">Recherche des mises à jour… (jusqu'à 2 min)</div></div>`;
+    if (U.host) h += `<button class="cell icon tap" data-host>${icoBox(I.disk, "gray")}<div class="body"><div class="t">Hôte ${esc(S.ov?.nodes[0]?.node || "")}</div>
+      <div class="s">${U.host.packages.length ? `${U.host.packages.length} paquet${U.host.packages.length > 1 ? "s" : ""} · à faire dans le Shell de Proxmox` : "À jour ✓"}</div></div>${I.chev}</button>`;
+    h += U.cts.map(c => { const j = jobs[c.vmid], n = c.packages.length;
+      const sub = j?.status === "snapshot" ? "⏳ Snapshot…" : j?.status === "upgrade" || j?.status === "start" ? "⏳ Mise à jour en cours…"
+        : j?.status === "done" ? `✓ Mis à jour${j.snapshot ? " · snapshot " + esc(j.snapshot) : ""}` : j?.status === "error" ? `<span style="color:var(--red)">✕ ${esc(j.error)}</span>`
+        : c.pm === "none" ? "Gestionnaire de paquets inconnu" : n ? `${n} paquet${n > 1 ? "s" : ""} à mettre à jour · ${esc(c.pm)}` : "À jour ✓";
+      return `<button class="cell icon tap" data-ct="${c.vmid}">${icoBox(I.ct, n && !j ? "orange" : "teal")}<div class="body"><div class="t ell">${esc(c.name || c.vmid)} <span class="mute" style="font-size:13px">CT ${c.vmid}</span></div>
+        <div class="s">${sub}</div></div>${I.chev}</button>`; }).join("");
+    if (!U.scanning && !U.cts.length && !U.host) h += `<div class="cell"><div class="body mute">Aucun conteneur allumé</div></div>`;
+    const todo = ctsToUpdate().filter(c => !["start", "snapshot", "upgrade", "done"].includes(jobs[c.vmid]?.status));
+    if (todo.length > 1) h += `<button class="cell icon tap act" id="updAll">${icoBox(I.reboot, "accent")}<div class="body">Tout mettre à jour (${todo.length} conteneurs)</div></button>`;
+  }
+  h += `</div><div class="ftr">${U?.checked_at ? `Vérifié ${ago(U.checked_at)}. ` : ""}Un snapshot est pris avant chaque mise à jour pour pouvoir revenir en arrière. Les VM ne sont pas incluses.</div>
+    <div style="height:calc(40px + env(safe-area-inset-bottom))"></div>`;
+  $("#maint").innerHTML = h; $("#maint").scrollTop = sc;
+  $("#mRefresh").onclick = () => { S.mB = null; S.mU = { scanning: true, cts: [] }; renderMaint(); loadMaint(true); };
+}
+$("#maint").addEventListener("scroll", () => $("#mnav")?.classList.toggle("scrolled", $("#maint").scrollTop > 30), { passive: true });
+function showPackages(title, pkgs) {
+  const m = document.createElement("div"); m.className = "modal";
+  m.innerHTML = `<div class="card-sheet"><div class="grab"></div><div class="shead"><span style="width:60px"></span><h2>${title}</h2><button class="navbtn" style="font-weight:600;width:60px;justify-content:flex-end" data-close>OK</button></div>
+    <div class="group" style="margin-top:12px"><pre class="out">${esc(pkgs.join("\n") || "Aucun paquet")}</pre></div></div>`;
+  m.onclick = e => { if (e.target === m || e.target.closest("[data-close]")) m.remove(); };
+  document.body.appendChild(m);
+}
+async function upgradeCt(vmid, snapshot = true) {
+  const g = S.ov.guests.find(x => x.vmid == vmid); if (!g) return;
+  S.mJobs = S.mJobs || {};
+  let j;
+  try { j = await api("/api/maint/upgrade", { body: { node: g.node, vmid, snapshot } }); }
+  catch (e) { toast("❌ " + e.message); return; }
+  S.mJobs[vmid] = { status: "start" }; renderMaint();
+  for (;;) {  // suivi jusqu'à la fin
+    await new Promise(r => setTimeout(r, 3000));
+    try { S.mJobs[vmid] = await api("/api/maint/job?" + qs({ id: j.job })); } catch { continue; }
+    if (S.maintOpen) renderMaint();
+    if (["done", "error"].includes(S.mJobs[vmid].status)) break;
+  }
+  const r = S.mJobs[vmid];
+  if (r.status === "done") toast(`✅ ${g.name || vmid} mis à jour`);
+  else if (snapshot && /Snapshot impossible/.test(r.error || "")) {
+    if (await confirmBox("Snapshot impossible", `Le stockage de ${esc(g.name || vmid)} ne permet pas les snapshots. Mettre à jour quand même, sans retour en arrière possible ?`, "Mettre à jour sans snapshot", true)) return upgradeCt(vmid, false);
+  } else toast("❌ " + (r.error || "Échec"), 6000);
+}
+$("#maint").addEventListener("click", async e => {
+  const g = e.target.closest("[data-g]"), c = e.target.closest("[data-ct]");
+  if (g) { if (findGuest(g.dataset.g)) openGuest(g.dataset.g); return; }
+  if (e.target.closest("[data-host]")) {
+    const hp = S.mU.host.packages;
+    const i = await actionSheet("Hôte Proxmox", "La mise à jour de l'hôte se fait dans le Shell de Proxmox, pour pouvoir répondre à ses questions : <br><code>apt update && apt dist-upgrade</code>", [{ label: `Voir les paquets (${hp.length})` }]);
+    if (i === 0) showPackages("Hôte", hp); return;
+  }
+  if (e.target.closest("#updAll")) {
+    const todo = ctsToUpdate().filter(x => !S.mJobs?.[x.vmid]);
+    if (!await confirmBox(`Mettre à jour ${todo.length} conteneurs ?`, "Un snapshot de chacun est pris avant, l'un après l'autre.", "Tout mettre à jour")) return;
+    for (const x of todo) await upgradeCt(x.vmid);
+    loadMaint(); return;
+  }
+  if (c) {
+    const ct = S.mU.cts.find(x => x.vmid == c.dataset.ct); if (!ct) return;
+    if (["start", "snapshot", "upgrade"].includes(S.mJobs?.[ct.vmid]?.status)) return toast("Mise à jour déjà en cours");
+    const n = ct.packages.length, btns = [{ label: "Mettre à jour (snapshot avant)" }, { label: "Mettre à jour sans snapshot", danger: true }, { label: `Voir les paquets (${n})` }];
+    const i = await actionSheet(esc(ct.name || ct.vmid), n ? `${n} paquet${n > 1 ? "s" : ""} à mettre à jour` : "Déjà à jour", n ? btns : [btns[2]]);
+    if (n && i === 0) upgradeCt(ct.vmid, true);
+    if (n && i === 1) upgradeCt(ct.vmid, false);
+    if ((n && i === 2) || (!n && i === 0)) showPackages(esc(ct.name || ct.vmid), ct.packages);
+  }
+});
+
 // ---------- mise à jour
 async function checkVersion(force) {
   try { S.ver = await api("/api/version" + (force ? "?check=1" : "")); } catch { return; }
@@ -1170,7 +1318,8 @@ async function start() {
   try { S.ov = await api("/api/overview"); } catch (e) { if (e.message === "Non connecté") return; }
   $("#login").classList.add("hide"); $("#app").classList.remove("hide");
   setView(S.view); loop();
-  checkVersion(); setInterval(() => document.visibilityState === "visible" && checkVersion(), 3600000);  // lit le cache du serveur, GitHub n'est interrogé qu'une fois par semaine
+  checkVersion(); loadMaint(); setInterval(() => document.visibilityState === "visible" && loadMaint(), 300000);
+  setInterval(() => document.visibilityState === "visible" && checkVersion(), 3600000);  // lit le cache du serveur, GitHub n'est interrogé qu'une fois par semaine
 }
 start();
 </script>

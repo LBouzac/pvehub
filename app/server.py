@@ -433,6 +433,157 @@ def r_approval(d):
     return hermes("POST", f"/v1/runs/{run_id}/approval", body)
 
 
+# ---------------------------------------------------------------- maintenance : sauvegardes
+def job_covers(job, vmid):
+    """Une sauvegarde planifiée inclut-elle cette machine ?"""
+    # shortcut: les jobs par pool sont ignorés ; ajouter /pools si quelqu'un les utilise
+    if str(job.get("enabled", 1)) == "0":
+        return False
+    ids = lambda k: {int(x) for x in re.findall(r"\d+", str(job.get(k) or ""))}
+    if str(job.get("all", 0)) == "1":
+        return vmid not in ids("exclude")
+    return vmid in ids("vmid")
+
+
+def r_maint_backups(_):
+    nodes = [n["node"] for n in pve("GET", "/nodes") or [] if n.get("status") == "online"]
+    guests = [g for g in pve("GET", "/cluster/resources", {"type": "vm"}) or [] if not g.get("template")]
+    try:
+        jobs = pve("GET", "/cluster/backup") or []
+    except ApiError:
+        jobs = []
+    last, failed = {}, []
+    for node in nodes:
+        for st in backup_storages(node):
+            try:
+                items = pve("GET", f"/nodes/{node}/storage/{st}/content", {"content": "backup"}) or []
+            except ApiError:
+                continue
+            for it in items:
+                v, cur = it.get("vmid"), last.get(it.get("vmid"))
+                if v is not None and (not cur or it.get("ctime", 0) > cur["ctime"]):
+                    last[v] = {"ctime": it.get("ctime", 0), "size": it.get("size", 0), "storage": st}
+        try:
+            for t in pve("GET", f"/nodes/{node}/tasks", {"typefilter": "vzdump", "limit": 30}) or []:
+                if t.get("endtime") and t.get("status") not in (None, "OK") and time.time() - t["starttime"] < 7 * 86400:
+                    failed.append({"starttime": t["starttime"], "status": t["status"], "vmid": t.get("id") or None})
+        except ApiError:
+            pass
+    rows = []
+    for g in sorted(guests, key=lambda g: g["vmid"]):
+        b = last.get(g["vmid"])
+        rows.append({"id": g["id"], "vmid": g["vmid"], "name": g.get("name", ""), "type": g["type"], "node": g["node"],
+                     "last": b, "planned": any(job_covers(j, g["vmid"]) for j in jobs)})
+    return {"guests": rows, "failed": failed[:5],
+            "jobs": [{"schedule": j.get("schedule") or j.get("starttime"), "enabled": str(j.get("enabled", 1)) != "0",
+                      "all": str(j.get("all", 0)) == "1", "vmid": j.get("vmid"), "storage": j.get("storage"),
+                      "comment": j.get("comment")} for j in jobs]}
+
+
+# ---------------------------------------------------------------- maintenance : mises à jour des conteneurs
+# Liste des paquets à mettre à jour dans chaque conteneur (index rafraîchi avant), en parallèle sur l'hôte
+UPD_PROBE = ("if command -v apk >/dev/null; then apk update -q >/dev/null 2>&1; echo pm=apk; apk list -u 2>/dev/null | cut -d' ' -f1; "
+             "elif command -v apt-get >/dev/null; then apt-get update -qq >/dev/null 2>&1; echo pm=apt; "
+             "apt list --upgradable 2>/dev/null | grep -v '^Listing' | cut -d/ -f1; else echo pm=none; fi")
+_updates = {"at": 0, "running": False, "cts": {}, "error": None}
+_jobs = {}  # mises à jour en cours : id -> {status, output, vmid}
+_maint_lock = threading.Lock()
+
+
+def scan_updates():
+    try:
+        cts = [g for g in pve("GET", "/cluster/resources", {"type": "vm"}) or []
+               if g["type"] == "lxc" and g.get("status") == "running" and not g.get("template")]
+        script = (f"d=$(mktemp -d); (sh -c {shlex.quote(UPD_PROBE)} > $d/host 2>/dev/null) & " + "".join(
+            f"(timeout 180 pct exec {g['vmid']} -- sh -c {shlex.quote(UPD_PROBE)} > $d/{g['vmid']} 2>/dev/null) & " for g in cts)
+            + "wait; for f in $d/*; do [ -f \"$f\" ] && echo \"@@${f##*/}\" && cat \"$f\"; done; rm -rf $d")
+        found = {}
+        if EXEC_ENABLED:
+            code, out = run_ssh(f"sh -c {shlex.quote(script)}", timeout=240)
+            cur = None
+            for line in out.splitlines():
+                if line.startswith("@@") and (line[2:].isdigit() or line[2:] == "host"):
+                    cur = int(line[2:]) if line[2:].isdigit() else "host"
+                    found[cur] = {"pm": None, "packages": []}
+                elif cur is not None and line.startswith("pm="):
+                    found[cur]["pm"] = line[3:]
+                elif cur is not None and line.strip():
+                    found[cur]["packages"].append(line.strip())
+        names = {g["vmid"]: g.get("name", "") for g in cts}
+        _updates["host"] = found.pop("host", None)
+        _updates.update(cts={v: {**d, "name": names.get(v, "")} for v, d in found.items()}, error=None)
+    except Exception as e:  # noqa: BLE001 — tâche de fond : l'erreur est montrée dans l'écran
+        _updates["error"] = str(e)[:200]
+    finally:
+        _updates.update(at=time.time(), running=False)
+
+
+def r_maint_updates(q):
+    if not EXEC_ENABLED:
+        raise ApiError(403, "Active la section Commandes pour voir les mises à jour des conteneurs")
+    with _maint_lock:
+        if not _updates["running"] and (q.get("refresh") or time.time() - _updates["at"] > 6 * 3600):
+            _updates["running"] = True
+            threading.Thread(target=scan_updates, daemon=True).start()
+    return {"scanning": _updates["running"], "checked_at": int(_updates["at"]) or None, "error": _updates["error"],
+            "host": _updates.get("host"), "cts": [{"vmid": v, **d} for v, d in sorted(_updates["cts"].items())],
+            "jobs": {k: {kk: vv for kk, vv in j.items() if kk != "output"} for k, j in _jobs.items()}}
+
+
+def run_upgrade(job_id, node, vmid, snapshot):
+    job = _jobs[job_id]
+    try:
+        if snapshot:
+            job["status"] = "snapshot"
+            name = "avant-maj-" + time.strftime("%Y%m%d-%H%M")
+            upid = pve("POST", f"/nodes/{node}/lxc/{vmid}/snapshot", {"snapname": name, "description": "Avant mise à jour (PVE Hub)"})
+            for _ in range(120):  # attend la fin du snapshot (2 min max)
+                st = pve("GET", f"/nodes/{node}/tasks/{urllib.parse.quote(upid, safe='')}/status") or {}
+                if st.get("status") == "stopped":
+                    if st.get("exitstatus") != "OK":
+                        raise ApiError(502, f"Snapshot impossible : {st.get('exitstatus')}")
+                    break
+                time.sleep(1)
+            job["snapshot"] = name
+        job["status"] = "upgrade"
+        pm = _updates["cts"].get(vmid, {}).get("pm")
+        cmd = ("apk upgrade -q --no-cache" if pm == "apk" else
+               "export DEBIAN_FRONTEND=noninteractive; apt-get -y -q -o Dpkg::Options::=--force-confdef "
+               "-o Dpkg::Options::=--force-confold dist-upgrade && apt-get -y -q autoremove")
+        code, out = run_ssh(f"pct exec {vmid} -- sh -c {shlex.quote(cmd)}", timeout=1500)
+        job["output"] = out[-4000:]
+        if code != 0:
+            raise ApiError(502, f"La mise à jour a échoué (code {code})")
+        job["status"] = "done"
+        _updates["cts"].get(vmid, {})["packages"] = []
+    except ApiError as e:
+        job.update(status="error", error=e.msg)
+    except Exception as e:  # noqa: BLE001
+        job.update(status="error", error=str(e)[:200])
+
+
+def r_maint_upgrade(d):
+    if not EXEC_ENABLED:
+        raise ApiError(403, "Active la section Commandes")
+    node, typ, vmid = guest_args({**d, "type": "lxc"})
+    with _maint_lock:
+        if any(j["vmid"] == vmid and j["status"] in ("snapshot", "upgrade") for j in _jobs.values()):
+            raise ApiError(409, "Mise à jour déjà en cours sur cette machine")
+        for k in [k for k, j in _jobs.items() if time.time() - j["at"] > 86400]:
+            del _jobs[k]  # on oublie les mises à jour terminées depuis plus d'un jour
+        job_id = secrets.token_hex(6)
+        _jobs[job_id] = {"vmid": vmid, "status": "start", "at": int(time.time())}
+    threading.Thread(target=run_upgrade, args=(job_id, node, vmid, bool(d.get("snapshot", True))), daemon=True).start()
+    return {"job": job_id}
+
+
+def r_maint_job(q):
+    j = _jobs.get(str(q.get("id", "")))
+    if not j:
+        raise ApiError(404, "Tâche inconnue")
+    return j
+
+
 # ---------------------------------------------------------------- tâches planifiées (crontab de root)
 # Un champ : *, nombres ou noms (jan, mon…), combinés par , - / — « m » ou « dow » ne passent pas
 _TOK = r"(?:\*|\d+|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|sun|mon|tue|wed|thu|fri|sat)"
@@ -925,6 +1076,10 @@ ROUTES = {
     ("POST", "/api/chat"): Handler.chat,
     ("POST", "/api/chat/approval"): r_approval,
     ("POST", "/api/exec"): r_exec,
+    ("GET", "/api/maint/backups"): r_maint_backups,
+    ("GET", "/api/maint/updates"): r_maint_updates,
+    ("POST", "/api/maint/upgrade"): r_maint_upgrade,
+    ("GET", "/api/maint/job"): r_maint_job,
     ("GET", "/api/cron"): r_cron,
     ("POST", "/api/cron"): r_cron_save,
     ("GET", "/api/version"): r_version,
