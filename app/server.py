@@ -659,28 +659,59 @@ _jobs = {}  # mises à jour en cours : id -> {status, output, vmid}
 _maint_lock = threading.Lock()
 
 
+def guest_exec(g, script, timeout):
+    """Commande shell qui lance un script dans un conteneur (pct exec) ou une VM (agent QEMU)."""
+    if g["type"] == "lxc":
+        return f"timeout {timeout} pct exec {g['vmid']} -- sh -c {shlex.quote(script)}"
+    return f"timeout {timeout + 20} qm guest exec {g['vmid']} --timeout {timeout} -- sh -c {shlex.quote(script)}"
+
+
+def qm_output(text):
+    """Sortie de « qm guest exec » (JSON) → (code, texte) ; un texte qui n'est pas du JSON est rendu tel quel."""
+    try:
+        j = json.loads(text)
+        if not j.get("exited"):  # délai atteint : qm ne renvoie que le pid, la commande tourne encore dans la VM
+            return 124, "La commande tourne toujours dans la VM (délai dépassé)"
+        return j.get("exitcode", 0), (j.get("out-data", "") + j.get("err-data", ""))
+    except (ValueError, AttributeError):
+        return None, text
+
+
+def parse_updates(out):
+    """Sortie du balayage : sections « @@id » puis « pm=… » et un paquet par ligne (JSON pour une VM)."""
+    raw, cur = {}, None
+    for line in out.splitlines():
+        if line.startswith("@@") and (line[2:].isdigit() or line[2:] == "host"):
+            cur = int(line[2:]) if line[2:].isdigit() else "host"
+            raw[cur] = []
+        elif cur is not None:
+            raw[cur].append(line)
+    found = {}
+    for k, lines in raw.items():
+        text = "\n".join(lines)
+        if text.lstrip().startswith("{"):
+            text = qm_output(text)[1]
+        pm = next((l[3:] for l in text.splitlines() if l.startswith("pm=")), None)
+        found[k] = {"pm": pm, "packages": [l.strip() for l in text.splitlines() if l.strip() and not l.startswith("pm=")]}
+    return found
+
+
 def scan_updates():
     try:
+        # conteneurs et VM allumés ; une VM sans agent QEMU (ou sous Windows) ressort sans gestionnaire de paquets
         cts = [g for g in pve("GET", "/cluster/resources", {"type": "vm"}) or []
-               if g["type"] == "lxc" and g.get("status") == "running" and not g.get("template")]
+               if g.get("status") == "running" and not g.get("template")]
         script = (f"d=$(mktemp -d); (sh -c {shlex.quote(UPD_PROBE)} > $d/host 2>/dev/null) & " + "".join(
-            f"(timeout 180 pct exec {g['vmid']} -- sh -c {shlex.quote(UPD_PROBE)} > $d/{g['vmid']} 2>/dev/null) & " for g in cts)
+            f"({guest_exec(g, UPD_PROBE, 180)} > $d/{g['vmid']} 2>/dev/null) & " for g in cts)
             + "wait; for f in $d/*; do [ -f \"$f\" ] && echo \"@@${f##*/}\" && cat \"$f\"; done; rm -rf $d")
         found = {}
         if EXEC_ENABLED:
-            code, out = run_ssh(f"sh -c {shlex.quote(script)}", timeout=240)
-            cur = None
-            for line in out.splitlines():
-                if line.startswith("@@") and (line[2:].isdigit() or line[2:] == "host"):
-                    cur = int(line[2:]) if line[2:].isdigit() else "host"
-                    found[cur] = {"pm": None, "packages": []}
-                elif cur is not None and line.startswith("pm="):
-                    found[cur]["pm"] = line[3:]
-                elif cur is not None and line.strip():
-                    found[cur]["packages"].append(line.strip())
-        names = {g["vmid"]: g.get("name", "") for g in cts}
+            code, out = run_ssh(f"sh -c {shlex.quote(script)}", timeout=260)
+            found = parse_updates(out)
+        info = {g["vmid"]: g for g in cts}
         _updates["host"] = found.pop("host", None)
-        _updates.update(cts={v: {**d, "name": names.get(v, "")} for v, d in found.items()}, error=None)
+        _updates.update(cts={v: {**d, "name": info[v].get("name", ""), "type": info[v]["type"]} for v, d in found.items() if v in info},
+                        error=None)
     except Exception as e:  # noqa: BLE001 — tâche de fond : l'erreur est montrée dans l'écran
         _updates["error"] = str(e)[:200]
     finally:
@@ -699,13 +730,13 @@ def r_maint_updates(q):
             "jobs": {k: {kk: vv for kk, vv in j.items() if kk != "output"} for k, j in list(_jobs.items())}}
 
 
-def run_upgrade(job_id, node, vmid, snapshot):
+def run_upgrade(job_id, node, typ, vmid, snapshot):
     job = _jobs[job_id]
     try:
         if snapshot:
             job["status"] = "snapshot"
-            name = "avant-maj-" + time.strftime("%Y%m%d-%H%M")
-            upid = pve("POST", f"/nodes/{node}/lxc/{vmid}/snapshot", {"snapname": name, "description": "Avant mise à jour (PVE Hub)"})
+            name = "avant-maj-" + local_now().strftime("%Y%m%d-%H%M")
+            upid = pve("POST", f"/nodes/{node}/{typ}/{vmid}/snapshot", {"snapname": name, "description": "Avant mise à jour (PVE Hub)"})
             for _ in range(120):  # attend la fin du snapshot (2 min max)
                 st = pve("GET", f"/nodes/{node}/tasks/{urllib.parse.quote(upid, safe='')}/status") or {}
                 if st.get("status") == "stopped":
@@ -719,7 +750,10 @@ def run_upgrade(job_id, node, vmid, snapshot):
         cmd = ("apk upgrade -q --no-cache" if pm == "apk" else
                "export DEBIAN_FRONTEND=noninteractive; apt-get -y -q -o Dpkg::Options::=--force-confdef "
                "-o Dpkg::Options::=--force-confold dist-upgrade && apt-get -y -q autoremove")
-        code, out = run_ssh(f"pct exec {vmid} -- sh -c {shlex.quote(cmd)}", timeout=1500)
+        code, out = run_ssh(guest_exec({"type": typ, "vmid": vmid}, cmd, 1500), timeout=1560)
+        if typ == "qemu":
+            c, out = qm_output(out)
+            code = code if c is None else c
         job["output"] = out[-4000:]
         if code != 0:
             raise ApiError(502, f"La mise à jour a échoué (code {code})")
@@ -729,15 +763,15 @@ def run_upgrade(job_id, node, vmid, snapshot):
         job.update(status="error", error=e.msg)
     except Exception as e:  # noqa: BLE001
         job.update(status="error", error=str(e)[:200])
-    name = _updates["cts"].get(vmid, {}).get("name") or f"Conteneur {vmid}"
+    name = _updates["cts"].get(vmid, {}).get("name") or f"{'VM' if typ == 'qemu' else 'Conteneur'} {vmid}"
     log_event("update", f"{name} mis à jour" if job["status"] == "done" else f"{name} : mise à jour en échec",
-              job.get("error") or (f"Snapshot {job['snapshot']}" if job.get("snapshot") else ""), f"/#g=lxc/{vmid}")
+              job.get("error") or (f"Snapshot {job['snapshot']}" if job.get("snapshot") else ""), f"/#g={typ}/{vmid}")
 
 
 def r_maint_upgrade(d):
     if not EXEC_ENABLED:
         raise ApiError(403, "Active la section Commandes")
-    node, typ, vmid = guest_args({**d, "type": "lxc"})
+    node, typ, vmid = guest_args({**d, "type": d.get("type") or "lxc"})
     with _maint_lock:
         if any(j["vmid"] == vmid and j["status"] in ("snapshot", "upgrade") for j in _jobs.values()):
             raise ApiError(409, "Mise à jour déjà en cours sur cette machine")
@@ -745,7 +779,7 @@ def r_maint_upgrade(d):
             del _jobs[k]  # on oublie les mises à jour terminées depuis plus d'un jour
         job_id = secrets.token_hex(6)
         _jobs[job_id] = {"vmid": vmid, "status": "start", "at": int(time.time())}
-    threading.Thread(target=run_upgrade, args=(job_id, node, vmid, bool(d.get("snapshot", True))), daemon=True).start()
+    threading.Thread(target=run_upgrade, args=(job_id, node, typ, vmid, bool(d.get("snapshot", True))), daemon=True).start()
     return {"job": job_id}
 
 
@@ -1032,7 +1066,7 @@ def send_push(title, body, url="/", tag=None):
     return ok
 
 
-ALERT_DEFAULTS = {"stopped": True, "disk": True, "disk_threshold": 90, "backup": True, "updates": True,
+ALERT_DEFAULTS = {"stopped": True, "disk": True, "disk_threshold": 90, "backup": True, "updates": True, "apps": True,
                   "report": False, "report_time": "08:00", "tz": os.environ.get("TZ") or "UTC"}
 REPORTS_FILE = os.path.join(DATA_DIR, "reports.json")  # derniers rapports du matin
 
@@ -1094,7 +1128,7 @@ def r_push_test(_):
 
 def r_alert_settings(d):
     s = alert_settings()
-    for k in ("stopped", "disk", "backup", "updates", "report"):
+    for k in ("stopped", "disk", "backup", "updates", "report", "apps"):
         if k in d:
             s[k] = bool(d[k])
     if "report_time" in d:
@@ -1179,6 +1213,29 @@ def check_late_backups(rows, now):
     return [("Sauvegardes en retard", f"Pas de sauvegarde depuis plus de 7 jours : {names}.", "/#maint")]
 
 
+def check_apps(prev, apps):
+    """Apps de l'onglet Apps qui répondaient et ne répondent plus (2 vérifications de suite, contre les faux positifs).
+    prev : {id: {"up_seen", "fails", "down"}} mis à jour sur place. Retourne (alertes, apps revenues)."""
+    alerts, back, ids = [], [], set()
+    for a in apps:
+        if a.get("hidden") or a.get("up") not in (True, False):
+            continue
+        ids.add(a["id"])
+        st = prev.setdefault(a["id"], {"up_seen": False, "fails": 0, "down": False})
+        if a["up"]:
+            if st["down"]:
+                back.append(a["name"])
+            st.update(up_seen=True, fails=0, down=False)
+        else:
+            st["fails"] += 1
+            if st["fails"] >= 2 and st["up_seen"] and not st["down"]:  # jamais vue en ligne : pas une panne, juste une adresse morte
+                st["down"] = True
+                alerts.append(("App hors ligne", f"{a['name']} ne répond plus ({a['url']}).", "/#apps"))
+    for k in [k for k in prev if k not in ids]:
+        del prev[k]  # machine arrêtée ou app masquée : l'alerte « machine arrêtée » prend le relais
+    return alerts, back
+
+
 def disk_items(nodes, storages, guests):
     items = [(f"node:{n['node']}", f"Le disque système de {n['node']}", n.get("disk", 0), n.get("maxdisk", 0)) for n in nodes]
     items += [(f"st:{s['node']}:{s['storage']}", f"Le stockage {s['storage']}", s.get("disk", 0), s.get("maxdisk", 0))
@@ -1217,6 +1274,16 @@ def monitor_once(ctx):
         nodes = pve("GET", "/nodes") or []
         storages = pve("GET", "/cluster/resources", {"type": "storage"}) or []
         alerts += check_disk(disk_items(nodes, storages, guests), s["disk_threshold"], state["disk"], now)
+    # apps de l'onglet Apps : toutes les 5 minutes (balayage des ports par SSH)
+    if s["apps"] and now - ctx.get("apps_at", 0) >= 290:
+        ctx["apps_at"] = now
+        try:
+            a, back = check_apps(ctx.setdefault("apps", {}), r_apps({})["apps"])
+            alerts += a
+            for name in back:
+                log_event("alert", f"{name} répond à nouveau", url="/#apps")
+        except ApiError:
+            pass
     a, state["failed_end"] = check_failed_backups(tasks, state.get("failed_end", now))
     alerts += a if s["backup"] else []
     # une fois par jour, en matinée : machines couvertes par une sauvegarde planifiée mais pas sauvegardées depuis 7 jours
@@ -1232,7 +1299,7 @@ def monitor_once(ctx):
         cts = [c for c in _updates["cts"].values() if c["packages"]]
         host = len((_updates.get("host") or {}).get("packages", []))
         if cts or host:
-            parts = [f"{len(cts)} conteneur{'s' if len(cts) > 1 else ''} ({sum(len(c['packages']) for c in cts)} paquets)"] if cts else []
+            parts = [f"{len(cts)} machine{'s' if len(cts) > 1 else ''} ({sum(len(c['packages']) for c in cts)} paquets)"] if cts else []
             parts += [f"l'hôte ({host} paquets)"] if host else []
             alerts.append(("Mises à jour disponibles", " et ".join(parts) + " à mettre à jour.", "/#maint"))
     for title, body, url in alerts:

@@ -987,6 +987,7 @@ function openFromHash() {
   if (h === "maint") openMaint();
   else if (h === "report") openLatestReport();
   else if (h === "security") openSettings();
+  else if (h === "apps") setView("apps");
   else if (h === "journal" || h.startsWith("journal=")) openJournal(h.split("=")[1]);
   else if (h.startsWith("g=") && findGuest(h.slice(2))) { setView("guests"); openGuest(h.slice(2)); }
 }
@@ -1223,14 +1224,15 @@ function renderMaint() {
     h += U.cts.map(c => { const j = jobs[c.vmid], n = c.packages.length;
       const sub = j?.status === "snapshot" ? "⏳ Snapshot…" : j?.status === "upgrade" || j?.status === "start" ? "⏳ Mise à jour en cours…"
         : j?.status === "done" ? `✓ Mis à jour${j.snapshot ? " · snapshot " + esc(j.snapshot) : ""}` : j?.status === "error" ? `<span style="color:var(--red)">✕ ${esc(j.error)}</span>`
-        : c.pm === "none" ? "Gestionnaire de paquets inconnu" : n ? `${n} paquet${n > 1 ? "s" : ""} à mettre à jour · ${esc(c.pm)}` : "À jour ✓";
-      return `<button class="cell icon tap" data-ct="${c.vmid}">${icoBox(I.ct, n && !j ? "orange" : "teal")}<div class="body"><div class="t ell">${esc(c.name || c.vmid)} <span class="mute" style="font-size:13px">CT ${c.vmid}</span></div>
+        : !c.pm && c.type === "qemu" ? "Agent QEMU absent, ou système non pris en charge" : !c.pm || c.pm === "none" ? "Gestionnaire de paquets inconnu"
+        : n ? `${n} paquet${n > 1 ? "s" : ""} à mettre à jour · ${esc(c.pm)}` : "À jour ✓";
+      return `<button class="cell icon tap" data-ct="${c.vmid}">${icoBox(c.type === "qemu" ? I.vm : I.ct, n && !j ? "orange" : "teal")}<div class="body"><div class="t ell">${esc(c.name || c.vmid)} <span class="mute" style="font-size:13px">${kind(c.type || "lxc")} ${c.vmid}</span></div>
         <div class="s">${sub}</div></div>${I.chev}</button>`; }).join("");
-    if (!U.scanning && !U.cts.length && !U.host) h += `<div class="cell"><div class="body mute">Aucun conteneur allumé</div></div>`;
+    if (!U.scanning && !U.cts.length && !U.host) h += `<div class="cell"><div class="body mute">Aucune machine allumée</div></div>`;
     const todo = ctsToUpdate().filter(c => !["start", "snapshot", "upgrade", "done"].includes(jobs[c.vmid]?.status));
-    if (todo.length > 1) h += `<button class="cell icon tap act" id="updAll">${icoBox(I.reboot, "accent")}<div class="body">Tout mettre à jour (${todo.length} conteneurs)</div></button>`;
+    if (todo.length > 1) h += `<button class="cell icon tap act" id="updAll">${icoBox(I.reboot, "accent")}<div class="body">Tout mettre à jour (${todo.length} machines)</div></button>`;
   }
-  h += `</div><div class="ftr">${U?.checked_at ? `Vérifié ${ago(U.checked_at)}. ` : ""}Un snapshot est pris avant chaque mise à jour pour pouvoir revenir en arrière. Les VM ne sont pas incluses.</div>
+  h += `</div><div class="ftr">${U?.checked_at ? `Vérifié ${ago(U.checked_at)}. ` : ""}Un snapshot est pris avant chaque mise à jour pour pouvoir revenir en arrière. Pour une VM, l'agent QEMU doit être installé et actif (qemu-guest-agent).</div>
     <div style="height:calc(40px + env(safe-area-inset-bottom))"></div>`;
   $("#maint").innerHTML = h; $("#maint").scrollTop = sc;
   $("#mRefresh").onclick = () => { S.mB = null; S.mU = { scanning: true, cts: [] }; renderMaint(); loadMaint(true); };
@@ -1247,7 +1249,7 @@ async function upgradeCt(vmid, snapshot = true) {
   const g = S.ov.guests.find(x => x.vmid == vmid); if (!g) return;
   S.mJobs = S.mJobs || {};
   let j;
-  try { j = await api("/api/maint/upgrade", { body: { node: g.node, vmid, snapshot } }); }
+  try { j = await api("/api/maint/upgrade", { body: { node: g.node, type: g.type, vmid, snapshot } }); }
   catch (e) { toast("❌ " + e.message); return; }
   S.mJobs[vmid] = { status: "start" }; renderMaint();
   for (;;) {  // suivi jusqu'à la fin
@@ -1272,7 +1274,7 @@ $("#maint").addEventListener("click", async e => {
   }
   if (e.target.closest("#updAll")) {
     const todo = ctsToUpdate().filter(x => !S.mJobs?.[x.vmid]);
-    if (!await confirmBox(`Mettre à jour ${todo.length} conteneurs ?`, "Un snapshot de chacun est pris avant, l'un après l'autre.", "Tout mettre à jour")) return;
+    if (!await confirmBox(`Mettre à jour ${todo.length} machines ?`, "Un snapshot de chacune est pris avant, l'une après l'autre.", "Tout mettre à jour")) return;
     for (const x of todo) await upgradeCt(x.vmid);
     loadMaint(); return;
   }
@@ -1350,6 +1352,7 @@ function notifHtml() {
     <span class="sw"><input type="checkbox" data-alert="${k}" ${s[k] ? "checked" : ""} aria-label="${label}"><span></span></span></label>`;
   return h + `</div><div class="hdr">Alertes</div><div class="group">
     ${sw("stopped", "Machine arrêtée", "Sans qu'aucun arrêt n'ait été demandé")}
+    ${sw("apps", "App hors ligne", "Une app de l'onglet Apps ne répond plus")}
     ${sw("disk", "Disque ou stockage plein")}
     ${s.disk ? `<label class="cell"><div class="body">Seuil</div><select class="picker" data-alert="disk_threshold" style="direction:ltr;text-align-last:right">${[80, 85, 90, 95].map(v => `<option value="${v}" ${s.disk_threshold == v ? "selected" : ""}>${v} %</option>`).join("")}</select>${I.chev}</label>` : ""}
     ${sw("backup", "Sauvegardes", "Échec, ou machine non sauvegardée depuis 7 jours")}

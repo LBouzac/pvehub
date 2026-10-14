@@ -11,10 +11,10 @@ Petite app web pour piloter ton Proxmox depuis le téléphone, avec l'agent IA H
 - **Commandes** : lancer une commande sur l'hôte, dans un conteneur ou une VM, et voir le résultat
 - **Tâches planifiées** : la crontab de l'hôte et de chaque conteneur, en clair (« Tous les jours à 03:00 »)
 - **Maintenance** : sauvegardes planifiées, ancienneté de la dernière sauvegarde de chaque machine, paquets à mettre
-  à jour, mise à jour d'un conteneur en un tap avec un snapshot pris juste avant
+  à jour, mise à jour d'un conteneur ou d'une VM (avec l'agent QEMU) en un tap, avec un snapshot pris juste avant
 - **Hermes** : il connaît l'état du serveur et peut proposer des actions que tu valides d'un tap ; il te demande
   l'autorisation avant ses commandes sensibles
-- **Notifications** sur le téléphone : machine arrêtée toute seule, disque plein, sauvegarde en échec ou en retard,
+- **Notifications** sur le téléphone : machine arrêtée toute seule, app qui ne répond plus, disque plein, sauvegarde en échec ou en retard,
   résumé hebdomadaire des mises à jour
 - **Rapport du matin** : chaque jour à l'heure choisie, Hermes résume l'état du serveur en une notification ;
   un tap l'ouvre dans la conversation pour lui répondre
@@ -198,6 +198,9 @@ Les notifications ont besoin de l'adresse HTTPS (Tailscale, ci-dessus). Sur iPho
    - **Machine arrêtée** : une VM ou un conteneur qui tournait s'arrête sans qu'aucun arrêt n'ait été lancé
      (panne, manque de mémoire…). Un arrêt, un redémarrage, une sauvegarde ou une migration lancés depuis l'app ou
      depuis Proxmox ne déclenchent rien ;
+   - **App hors ligne** : une app de l'onglet Apps (Jellyfin, Home Assistant…) qui répondait ne répond plus,
+     alors que sa machine tourne. Vérifié toutes les 5 minutes, alerte après deux échecs de suite ; son retour est
+     noté dans le Journal ;
    - **Disque ou stockage plein** : au-delà du seuil choisi (80 à 95 %), rappel au plus une fois par jour ;
    - **Sauvegardes** : une sauvegarde en échec, et chaque matin les machines incluses dans une sauvegarde planifiée
      mais pas sauvegardées depuis 7 jours ;
@@ -217,7 +220,7 @@ la machine concernée ou l'écran Maintenance. Répète l'étape 3 sur chaque ap
 Onglet **Serveur** → **Journal** : l'historique de ce qui s'est passé, regroupé par jour, avec des filtres.
 - **Alertes** : toutes les alertes envoyées (même celles que tu as balayées) et les rapports du matin ;
 - **Connexions** : connexions réussies et mots de passe incorrects, avec l'adresse et le type d'appareil ;
-- **Actions** : apps installées ou désinstallées par le Store, mises à jour des conteneurs et de PVE Hub,
+- **Actions** : apps installées ou désinstallées par le Store, mises à jour des machines et de PVE Hub,
   appareils déconnectés, changement de mot de passe.
 
 Toucher un événement ouvre la machine ou l'écran concerné. Les 300 derniers événements sont gardés
@@ -321,6 +324,7 @@ Anciens conteneurs Debian : `journalctl -u pvehub -n 50` et `systemctl restart p
 | Réglages affiche « Tailscale installé mais pas connecté » | Voir [le nettoyage](#passer-de-loption-b-à-loption-a-nettoyage) si tu utilises le Tailscale de l'hôte |
 | Notifications « Indisponible ici » | Ouvre l'app en HTTPS (adresse Tailscale) et depuis son icône de l'écran d'accueil, pas depuis Safari (iOS 16.4+) |
 | Notifications « Mise à jour nécessaire » | Mets PVE Hub à jour : le module `py3-cryptography` sera installé |
+| Maintenance : « Agent QEMU absent » sur une VM | Dans la VM : `apt install qemu-guest-agent` puis `systemctl enable --now qemu-guest-agent` ; dans Proxmox, VM → Options → QEMU Guest Agent → Activé, puis redémarre la VM. Les VM Windows ne sont pas prises en charge |
 | La notification de test n'arrive pas | Le conteneur doit pouvoir joindre Internet (`web.push.apple.com` sur iPhone). Regarde le journal (« Notification refusée… »). Vérifie aussi Réglages de l'iPhone → Notifications → PVE Hub |
 | Le rapport du matin arrive à la mauvaise heure | Change l'heure une fois dans Réglages depuis le téléphone : il transmet son fuseau horaire. Mets aussi PVE Hub à jour (paquet `tzdata`) |
 | Le rapport est « factuel » au lieu d'être rédigé par Hermes | Hermes n'a pas répondu à temps : regarde le journal (« Rapport : Hermes indisponible… ») et la section 3 |

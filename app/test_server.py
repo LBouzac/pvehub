@@ -256,4 +256,26 @@ assert srv.same_guest({"guest": "2fauth"}, {"name": "2fauth"}) and not srv.same_
 assert srv.same_guest({}, {"name": "x"}) and not srv.same_guest({"guest": "x"}, None)
 # heure locale (le conteneur est en UTC)
 assert srv.local_time(0, {"tz": "Europe/Paris"}).hour == 1 or not srv.local_time(0, {"tz": "Europe/Paris"}).tzinfo
+# app hors ligne : seulement après 2 échecs de suite, et seulement si l'app a déjà répondu
+st = {}
+A = lambda up, i="lxc/101:8096", h=False: [{"id": i, "name": "Jellyfin", "url": "http://x:8096", "up": up, "hidden": h}]
+assert srv.check_apps(st, A(True)) == ([], [])
+assert srv.check_apps(st, A(False))[0] == []                      # un raté isolé : rien
+assert len(srv.check_apps(st, A(False))[0]) == 1                  # deux ratés : alerte
+assert srv.check_apps(st, A(False))[0] == []                      # pas de répétition
+assert srv.check_apps(st, A(True)) == ([], ["Jellyfin"])          # revenue
+st2 = {}
+for _ in range(3):
+    assert srv.check_apps(st2, A(False, "link:dead"))[0] == []     # jamais vue en ligne : pas d'alerte
+assert srv.check_apps(st, A(False, h=True)) == ([], []) and st == {}   # masquée : oubliée
+# mises à jour : conteneur (texte), VM (JSON de l'agent QEMU), VM sans agent, hôte
+import json as _j
+OUT = "\n".join(["@@host", "pm=apt", "bash", "@@101", "pm=apk", "musl", "busybox",
+                  "@@104", _j.dumps({"exitcode": 0, "exited": 1, "out-data": "pm=apt\nopenssl\n"}), "@@105"])
+f = srv.parse_updates(OUT)
+assert f["host"] == {"pm": "apt", "packages": ["bash"]} and f[101] == {"pm": "apk", "packages": ["musl", "busybox"]}
+assert f[104] == {"pm": "apt", "packages": ["openssl"]} and f[105] == {"pm": None, "packages": []}, f
+assert srv.qm_output(_j.dumps({"pid": 42}))[0] == 124            # délai dépassé : pas un succès
+assert srv.qm_output(_j.dumps({"exitcode": 3, "exited": 1, "err-data": "E"})) == (3, "E")
+assert "qm guest exec 104 --timeout 60" in srv.guest_exec({"type": "qemu", "vmid": 104}, "id", 60)
 print("ok")
