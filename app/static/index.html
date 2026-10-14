@@ -147,6 +147,8 @@ canvas{width:100%;height:120px;display:block}
 /* vue détail (poussée depuis la droite) */
 .push{position:fixed;inset:0;z-index:30;background:var(--bg);overflow-y:auto;transform:translateX(100%);transition:transform .35s cubic-bezier(.2,.8,.2,1);-webkit-overflow-scrolling:touch}
 .push.open{transform:none;box-shadow:-10px 0 30px rgba(0,0,0,.15)}
+.push{padding-inline:max(0px,calc((100% - 720px) / 2))}
+@media (min-width:700px){.modal{align-items:center}.card-sheet{border-radius:14px;max-height:85vh}}
 .push .navbar{position:sticky}
 
 /* feuilles modales */
@@ -325,6 +327,7 @@ canvas{width:100%;height:120px;display:block}
 <div class="push" id="store"></div>
 <div class="push" id="journal"></div>
 <div class="push" id="chats"></div>
+<div class="push" id="settings" style="z-index:36"></div>
 <div class="push" id="sheet" style="z-index:35"></div>
 <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
 
@@ -581,7 +584,7 @@ function openGuest(id) {
   renderGuest(); loadGuestExtras();
 }
 function closeGuest() { S.guest = null; $("#sheet").classList.remove("open"); }
-addEventListener("popstate", () => { if (S.guest) closeGuest(); else if (S.maintOpen) closeMaint(); else if (S.storeOpen) closeStore(); else if (S.jOpen) closeJournal(); else if (S.cOpen) closeChats(); });
+addEventListener("popstate", () => { if (S.setOpen) closeSettings(); else if (S.guest) closeGuest(); else if (S.maintOpen) closeMaint(); else if (S.storeOpen) closeStore(); else if (S.jOpen) closeJournal(); else if (S.cOpen) closeChats(); });
 
 function renderGuest() {
   const g = findGuest(S.guest); if (!g) return;
@@ -1481,109 +1484,118 @@ $("#journal").addEventListener("click", e => {
 // ---------- apparence
 const ACCENTS = [["blue", "Bleu"], ["indigo", "Indigo"], ["purple", "Violet"], ["pink", "Rose"], ["red", "Rouge"], ["orange", "Orange"], ["green", "Vert"], ["teal", "Turquoise"], ["mono", "Noir et blanc"]];
 const BGS = [["system", "Système"], ["tint", "Teinté"], ["contrast", "Contraste"]];
-function openSettings() {
-  const t = store.get("pvehub.theme", {});
-  const m = document.createElement("div"); m.className = "modal";
-  const draw = () => {
-    const mode = t.mode || "auto", acc = t.accent || "blue", bg = t.bg || "system";
-    const sc = m.firstElementChild?.scrollTop || 0;  // un rafraîchissement ne doit pas remonter en haut
-    m.innerHTML = `<div class="card-sheet"><div class="grab"></div><div class="shead"><span style="width:60px"></span><h2>Réglages</h2><button class="navbtn" style="font-weight:600;width:60px;justify-content:flex-end" data-close>OK</button></div>
-      <div class="hdr">Apparence</div>
+// Réglages : une page (comme Maintenance), pas une fenêtre. Chaque section se redessine seule quand ses données
+// arrivent : rien ne bouge sous le doigt, et un appui à côté ne ferme plus rien.
+const theme = () => store.get("pvehub.theme", {});
+const SET_SECTIONS = {
+  appear: () => {
+    const t = theme(), mode = t.mode || "auto", acc = t.accent || "blue", bg = t.bg || "system";
+    return `<div class="hdr">Apparence</div>
       <div class="seg" style="margin-bottom:0">${[["auto", "Auto"], ["light", "Clair"], ["dark", "Sombre"]].map(([k, l]) => `<button class="${mode === k ? "on" : ""}" data-mode="${k}">${l}</button>`).join("")}</div>
-      <div class="ftr">Auto suit le réglage de ton téléphone.</div>
+      <div class="ftr">Auto suit le réglage de ton appareil.</div>
       <div class="hdr">Couleur</div>
-      <div class="group"><div class="swatches">${ACCENTS.map(([k, l]) => `<button class="swatch ${acc === k ? "on" : ""}" data-accent="${k}" aria-label="${l}" title="${l}"><i data-c="${k}"></i></button>`).join("")}</div></div>
+      <div class="group"><div class="swatches">${ACCENTS.map(([k, l]) => `<button class="swatch ${acc === k ? "on" : ""}" data-accent="${k}" aria-label="${l}" aria-pressed="${acc === k}" title="${l}"><i data-c="${k}"></i></button>`).join("")}</div></div>
       <div class="ftr">${esc(ACCENTS.find(a => a[0] === acc)?.[1] || "")}</div>
       <div class="hdr">Fond</div>
-      <div class="bgs">${BGS.map(([k, l]) => `<button class="bgopt ${bg === k ? "on" : ""}" data-bg="${k}"><span class="pv" data-pv="${k}"><b></b><b></b></span>${l}</button>`).join("")}</div>
-      <div class="hdr">Notifications</div>
-      <div class="group">${notifHtml()}</div>
-      ${notifFooter()}
-      <div class="hdr">Assistant</div>
-      <div class="group"><label class="cell"><div class="body"><div class="t">Hermes</div><div class="s">${S.ov?.hermes_configured ? "Onglet, « Demander à Hermes », rapport rédigé" : "Non configuré"}</div></div>
-        <span class="sw"><input type="checkbox" data-app="hermes" aria-label="Hermes" ${S.ov?.hermes ? "checked" : ""} ${S.ov?.hermes_configured ? "" : "disabled"}><span></span></span></label></div>
-      <div class="ftr">${S.ov?.hermes_configured ? "Désactivé, Hermes disparaît de l'app sur tous tes appareils et le rapport du matin devient factuel. Tes conversations sont gardées."
-        : "Pour brancher Hermes, renseigne HERMES_URL et HERMES_KEY (section 3 du README)."}</div>
-      <div class="hdr">Accès à distance</div>
-      <div class="group">${remoteHtml()}</div>
-      <div class="ftr">${S.remote?.state === "Running" ? "Depuis l'extérieur : l'app Tailscale doit être connectée sur ton téléphone, avec le même compte."
-        : "Pour ouvrir l'app hors de chez toi, en HTTPS, lance cette commande dans le Shell de Proxmox."}</div>
-      <div class="hdr">Mise à jour</div>
-      <div class="group">
-        <div class="cell"><div class="body">Version</div><div class="v" style="font-family:var(--mono);font-size:15px">${esc(S.ver?.local || "inconnue")}</div></div>
-        ${S.ver?.available ? `<button class="cell tap act" id="doUpd" ${S.ver.can_update ? "" : "disabled style='opacity:.4'"}><div class="body">Installer la nouvelle version</div></button>`
-          : `<button class="cell tap act" id="chkUpd"><div class="body">${S.ver?.error ? esc(S.ver.error) : S.ver ? "À jour · Vérifier maintenant" : "Vérifier maintenant"}</div></button>`}
-      </div>
-      <div class="ftr">${S.ver?.checked_at ? `Dernière vérification : ${when(S.ver.checked_at)}. ` : ""}Vérification automatique une fois par semaine.${S.ver && !S.ver.can_update ? "<br>" + esc(S.ver.why_not) : ""}</div>
-      ${securityHtml()}
-      <div class="hdr">Compte</div>
-      <div class="group"><button class="cell tap act danger" id="logout"><div class="body">Se déconnecter</div></button></div></div>`;
-    m.firstElementChild.scrollTop = sc;
-  };
-  draw();
-  api("/api/remote").then(r => { S.remote = r; if (m.isConnected) draw(); }).catch(() => {});
-  api("/api/auth").then(r => { S.auth = r; if (m.isConnected) draw(); }).catch(() => {});
-  pushState().then(() => { if (m.isConnected) draw(); });
-  m.onchange = async e => {  // réglages des alertes (communs à tous les appareils)
-    if (e.target.dataset.app) {
-      try { S.ov.hermes = (await api("/api/settings", { body: { [e.target.dataset.app]: e.target.checked } })).hermes; }
-      catch (err) { toast("❌ " + err.message); }
-      applyHermes(); return draw();
-    }
-    const k = e.target.dataset.alert; if (!k) return;
-    const v = e.target.type === "checkbox" ? e.target.checked : k === "report_time" ? e.target.value : +e.target.value;
-    if (k === "report_time" && !v) return;
-    // le fuseau du téléphone accompagne chaque réglage : le conteneur, lui, est à l'heure UTC
-    try { S.push.settings = (await api("/api/alerts", { body: { [k]: v, tz: Intl.DateTimeFormat().resolvedOptions().timeZone } })).settings; }
-    catch (err) { toast("❌ " + err.message); }
-    draw();
-  };
-  m.onclick = async e => {
-    if (e.target === m || e.target.closest("[data-close]")) return m.remove();
-    const cp = e.target.closest("[data-copy]"); if (cp) return copyText(cp.dataset.copy);
-    if (e.target.closest("#pushOn")) { await enablePush(); return draw(); }
-    if (e.target.closest("#reportNow")) { m.remove(); return reportNow(); }
-    if (e.target.closest("#pushOff")) { await disablePush(); return draw(); }
-    if (e.target.closest("#pushTest")) {
-      try { const r = await api("/api/push/test", { body: {} }); toast(`🔔 Envoyée à ${r.sent} appareil${r.sent > 1 ? "s" : ""}`); } catch (err) { toast("❌ " + err.message, 6000); }
-      return;
-    }
-    if (e.target.closest("#doUpd")) { m.remove(); return doUpdate(); }
-    if (e.target.closest("#chkUpd")) { e.target.closest("#chkUpd").querySelector(".body").textContent = "Vérification…"; await checkVersion(true); return draw(); }
-    if (e.target.closest("#jLogins")) { m.remove(); return openJournal("login"); }
-    if (e.target.closest("#chgPw")) {
-      const v = await alertForm("Changer le mot de passe", "Au moins 10 caractères. Les autres appareils seront déconnectés.",
-        [...(S.auth?.enabled ? [{ name: "current", ph: "Mot de passe actuel", type: "password" }] : []),
-         { name: "new", ph: "Nouveau mot de passe", type: "password" }, { name: "again", ph: "Confirmer", type: "password" }]);
-      if (!v) return;
-      if (v.new !== v.again) return toast("❌ Les deux mots de passe ne correspondent pas");
-      try { await api("/api/auth/password", { body: { current: v.current || "", new: v.new } }); toast("✅ Mot de passe changé"); }
-      catch (err) { return toast("❌ " + err.message, 5000); }
-      S.auth = await api("/api/auth").catch(() => S.auth); return draw();
-    }
-    if (e.target.closest("#revoke")) {
-      if (!await confirmBox("Déconnecter les autres appareils", "Tous les appareils devront se reconnecter, sauf celui-ci.", "Déconnecter", true)) return;
-      try { await api("/api/auth/revoke", { body: {} }); toast("✅ Autres appareils déconnectés"); } catch (err) { toast("❌ " + err.message); }
-      S.auth = await api("/api/auth").catch(() => S.auth); return draw();
-    }
-    const sb = e.target.closest("[data-ses]");
-    if (sb) {
-      const x = S.auth.sessions.find(z => z.id === sb.dataset.ses); if (!x) return;
-      if (!await confirmBox(esc(uaName(x.ua)), `${esc(x.who || x.ip)} · connecté le ${when(x.t)}`, x.current ? "Me déconnecter" : "Déconnecter cet appareil", true)) return;
-      try { await api("/api/auth/revoke", { body: { id: x.id } }); } catch (err) { return toast("❌ " + err.message); }
-      if (x.current) { m.remove(); return showLogin(); }
-      toast("✅ Appareil déconnecté"); S.auth = await api("/api/auth").catch(() => S.auth); return draw();
-    }
-    if (e.target.closest("#logout")) { await api("/api/logout", { body: {} }).catch(() => {}); m.remove(); return showLogin(); }
-    const b = e.target.closest("[data-mode],[data-accent],[data-bg]"); if (!b || b.tagName !== "BUTTON") return;
-    if (b.dataset.mode) t.mode = b.dataset.mode === "auto" ? undefined : b.dataset.mode;
-    if (b.dataset.accent) t.accent = b.dataset.accent;
-    if (b.dataset.bg) t.bg = b.dataset.bg;
-    store.set("pvehub.theme", t); applyTheme(); draw();
-    render(); drawGuestCharts();  // les graphiques canvas lisent les couleurs à chaque dessin
-  };
-  document.body.appendChild(m);
+      <div class="bgs">${BGS.map(([k, l]) => `<button class="bgopt ${bg === k ? "on" : ""}" data-bg="${k}" aria-pressed="${bg === k}"><span class="pv" data-pv="${k}"><b></b><b></b></span>${l}</button>`).join("")}</div>`;
+  },
+  notif: () => `<div class="hdr">Notifications</div><div class="group">${notifHtml()}</div>${notifFooter()}`,
+  assistant: () => `<div class="hdr">Assistant</div>
+    <div class="group"><label class="cell"><div class="body"><div class="t">Hermes</div><div class="s">${S.ov?.hermes_configured ? "Onglet, « Demander à Hermes », rapport rédigé" : "Non configuré"}</div></div>
+      <span class="sw"><input type="checkbox" data-app="hermes" aria-label="Hermes" ${S.ov?.hermes ? "checked" : ""} ${S.ov?.hermes_configured ? "" : "disabled"}><span></span></span></label></div>
+    <div class="ftr">${S.ov?.hermes_configured ? "Désactivé, Hermes disparaît de l'app sur tous tes appareils et le rapport du matin devient factuel. Tes conversations sont gardées."
+      : "Pour brancher Hermes, renseigne HERMES_URL et HERMES_KEY (section 3 du README)."}</div>`,
+  remote: () => `<div class="hdr">Accès à distance</div><div class="group">${remoteHtml()}</div>
+    <div class="ftr">${S.remote?.state === "Running" ? "Depuis l'extérieur : l'app Tailscale doit être connectée sur ton téléphone, avec le même compte."
+      : "Pour ouvrir l'app hors de chez toi, en HTTPS, lance cette commande dans le Shell de Proxmox."}</div>`,
+  update: () => `<div class="hdr">Mise à jour</div>
+    <div class="group">
+      <div class="cell"><div class="body">Version</div><div class="v" style="font-family:var(--mono);font-size:15px">${esc(S.ver?.local || "inconnue")}</div></div>
+      ${S.ver?.available ? `<button class="cell tap act" id="doUpd" ${S.ver.can_update ? "" : "disabled style='opacity:.4'"}><div class="body">Installer la nouvelle version</div></button>`
+        : `<button class="cell tap act" id="chkUpd"><div class="body">${S.ver?.error ? esc(S.ver.error) : S.ver ? "À jour · Vérifier maintenant" : "Vérifier maintenant"}</div></button>`}
+    </div>
+    <div class="ftr">${S.ver?.checked_at ? `Dernière vérification : ${when(S.ver.checked_at)}. ` : ""}Vérification automatique une fois par semaine.${S.ver && !S.ver.can_update ? "<br>" + esc(S.ver.why_not) : ""}</div>`,
+  security: () => securityHtml(),
+  account: () => `<div class="hdr">Compte</div><div class="group"><button class="cell tap act danger" id="logout"><div class="body">Se déconnecter</div></button></div>`,
+};
+function setSec(...ids) { for (const id of ids) { const el = $("#set-" + id); if (el) el.innerHTML = SET_SECTIONS[id](); } }
+function openSettings() {
+  const el = $("#settings");
+  el.innerHTML = `<div class="navbar" id="setnav"><div class="nt">Réglages</div>
+      <div class="side"><button class="navbtn" onclick="history.back()">${I.back}Retour</button></div><div class="side r"></div></div>
+    <h1 class="large">Réglages</h1>
+    ${Object.keys(SET_SECTIONS).map(k => `<section id="set-${k}">${SET_SECTIONS[k]()}</section>`).join("")}
+    <div style="height:calc(40px + env(safe-area-inset-bottom))"></div>`;
+  if (!S.setOpen) history.pushState({ set: 1 }, "");
+  S.setOpen = true; el.scrollTop = 0; el.classList.add("open");
+  api("/api/remote").then(r => { S.remote = r; setSec("remote"); }).catch(() => {});
+  api("/api/auth").then(r => { S.auth = r; setSec("security"); }).catch(() => {});
+  pushState().then(() => setSec("notif"));
 }
+function closeSettings() { S.setOpen = false; $("#settings").classList.remove("open"); }
+$("#settings").addEventListener("scroll", () => $("#setnav")?.classList.toggle("scrolled", $("#settings").scrollTop > 30), { passive: true });
+$("#settings").addEventListener("change", async e => {
+  const t = e.target;
+  if (t.dataset.app) {
+    t.disabled = true;  // pas de double appui pendant l'enregistrement
+    try { S.ov.hermes = (await api("/api/settings", { body: { [t.dataset.app]: t.checked } })).hermes; }
+    catch (err) { toast("❌ " + err.message); }
+    applyHermes(); return setSec("assistant", "notif");
+  }
+  const k = t.dataset.alert; if (!k) return;
+  const v = t.type === "checkbox" ? t.checked : k === "report_time" ? t.value : +t.value;
+  if (k === "report_time" && !v) return;
+  // le fuseau du téléphone accompagne chaque réglage : le conteneur, lui, est à l'heure UTC
+  let ok = true;
+  try { S.push.settings = (await api("/api/alerts", { body: { [k]: v, tz: Intl.DateTimeFormat().resolvedOptions().timeZone } })).settings; }
+  catch (err) { toast("❌ " + err.message); ok = false; }
+  // on ne redessine que si une option apparaît ou disparaît, ou pour remettre l'interrupteur après un échec
+  if (!ok || k === "disk" || k === "report") setSec("notif");
+});
+$("#settings").addEventListener("click", async e => {
+  const cp = e.target.closest("[data-copy]"); if (cp) return copyText(cp.dataset.copy);
+  if (e.target.closest("#pushOn")) { await enablePush(); return setSec("notif"); }
+  if (e.target.closest("#reportNow")) { closeSettings(); return reportNow(); }
+  if (e.target.closest("#pushOff")) { await disablePush(); return setSec("notif"); }
+  if (e.target.closest("#pushTest")) {
+    try { const r = await api("/api/push/test", { body: {} }); toast(`🔔 Envoyée à ${r.sent} appareil${r.sent > 1 ? "s" : ""}`); } catch (err) { toast("❌ " + err.message, 6000); }
+    return;
+  }
+  if (e.target.closest("#doUpd")) return doUpdate();
+  if (e.target.closest("#chkUpd")) { e.target.closest("#chkUpd").querySelector(".body").textContent = "Vérification…"; await checkVersion(true); return setSec("update"); }
+  if (e.target.closest("#jLogins")) { closeSettings(); return openJournal("login"); }
+  if (e.target.closest("#chgPw")) {
+    const v = await alertForm("Changer le mot de passe", "Au moins 10 caractères. Les autres appareils seront déconnectés.",
+      [...(S.auth?.enabled ? [{ name: "current", ph: "Mot de passe actuel", type: "password" }] : []),
+       { name: "new", ph: "Nouveau mot de passe", type: "password" }, { name: "again", ph: "Confirmer", type: "password" }]);
+    if (!v) return;
+    if (v.new !== v.again) return toast("❌ Les deux mots de passe ne correspondent pas");
+    try { await api("/api/auth/password", { body: { current: v.current || "", new: v.new } }); toast("✅ Mot de passe changé"); }
+    catch (err) { return toast("❌ " + err.message, 5000); }
+    S.auth = await api("/api/auth").catch(() => S.auth); return setSec("security");
+  }
+  if (e.target.closest("#revoke")) {
+    if (!await confirmBox("Déconnecter les autres appareils", "Tous les appareils devront se reconnecter, sauf celui-ci.", "Déconnecter", true)) return;
+    try { await api("/api/auth/revoke", { body: {} }); toast("✅ Autres appareils déconnectés"); } catch (err) { toast("❌ " + err.message); }
+    S.auth = await api("/api/auth").catch(() => S.auth); return setSec("security");
+  }
+  const sb = e.target.closest("[data-ses]");
+  if (sb) {
+    const x = S.auth.sessions.find(z => z.id === sb.dataset.ses); if (!x) return;
+    if (!await confirmBox(esc(uaName(x.ua)), `${esc(x.who || x.ip)} · connecté le ${when(x.t)}`, x.current ? "Me déconnecter" : "Déconnecter cet appareil", true)) return;
+    try { await api("/api/auth/revoke", { body: { id: x.id } }); } catch (err) { return toast("❌ " + err.message); }
+    if (x.current) { closeSettings(); return showLogin(); }
+    toast("✅ Appareil déconnecté"); S.auth = await api("/api/auth").catch(() => S.auth); return setSec("security");
+  }
+  if (e.target.closest("#logout")) { await api("/api/logout", { body: {} }).catch(() => {}); closeSettings(); return showLogin(); }
+  const b = e.target.closest("[data-mode],[data-accent],[data-bg]"); if (!b) return;
+  const t = theme();
+  if (b.dataset.mode) t.mode = b.dataset.mode === "auto" ? undefined : b.dataset.mode;
+  if (b.dataset.accent) t.accent = b.dataset.accent;
+  if (b.dataset.bg) t.bg = b.dataset.bg;
+  store.set("pvehub.theme", t); applyTheme(); setSec("appear");
+  render(); drawGuestCharts();  // les graphiques canvas lisent les couleurs à chaque dessin
+});
 
 function openPerms() {
   const auto = store.get("pvehub.auto", {});
