@@ -308,4 +308,32 @@ al = {}
 assert len(srv.check_disks([D(health="FAILED")], al, NOW)) == 1
 assert srv.check_disks([D(health="FAILED")], al, NOW + 3600) == []         # pas de répétition dans la journée
 assert srv.check_disks([D()], al, NOW + 7200) == [] and al == {}           # réparé : réarmé
+# horaires : à l'heure dite (10 min de marge), une seule fois par jour, selon les jours choisis
+import datetime as _dt
+IT = [{"id": "a", "time": "23:00", "days": "week", "enabled": True}, {"id": "b", "time": "08:00", "days": "weekend", "enabled": True},
+      {"id": "c", "time": "23:00", "days": "all", "enabled": False}]
+done = {}
+wed = lambda h, m: _dt.datetime(2026, 10, 14, h, m)        # mercredi
+assert srv.due_schedules(IT, wed(22, 59), done) == []
+assert [i["id"] for i in srv.due_schedules(IT, wed(23, 3), done)] == ["a"]
+assert srv.due_schedules(IT, wed(23, 4), done) == []                    # déjà fait aujourd'hui
+assert srv.due_schedules(IT, _dt.datetime(2026, 10, 15, 23, 15), done) == []   # plus de 10 min de retard
+assert [i["id"] for i in srv.due_schedules(IT, _dt.datetime(2026, 10, 17, 8, 0), {})] == ["b"]   # samedi
+srv.SCHED_FILE = os.path.join(srv.DATA_DIR, "sched.json")
+r = srv.r_schedules_save({"op": "add", "node": "pve", "type": "qemu", "vmid": 104, "action": "shutdown", "time": "23:30", "days": "all"})
+sid = r["items"][0]["id"]
+assert srv.r_schedules_save({"op": "toggle", "id": sid})["items"][0]["enabled"] is False
+for bad in ({"action": "reboot"}, {"time": "25:00"}, {"days": "lundi"}):
+    try:
+        srv.r_schedules_save({"op": "add", "node": "pve", "type": "lxc", "vmid": 101, "action": "start", "time": "07:00", "days": "all", **bad}); raise AssertionError(bad)
+    except srv.ApiError:
+        pass
+assert srv.r_schedules_save({"op": "delete", "id": sid})["items"] == []
+calls = []
+srv.pve = lambda m, path, params=None, timeout=30: calls.append((m, path))
+G2 = [{"vmid": 104, "type": "qemu", "node": "pve", "status": "stopped", "name": "jeux"}]
+srv.run_schedule({"vmid": 104, "type": "qemu", "action": "start", "time": "08:00"}, G2)
+srv.run_schedule({"vmid": 104, "type": "qemu", "action": "shutdown", "time": "23:00"}, G2)   # déjà éteinte : rien
+assert calls == [("POST", "/nodes/pve/qemu/104/status/start")], calls
+assert srv.r_events({})["events"][0]["title"] == "Allumage programmé : VM 104 « jeux »"
 print("ok")

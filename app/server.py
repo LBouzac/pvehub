@@ -1306,6 +1306,72 @@ def check_disks(disks, alerted, now):
     return alerts
 
 
+# ---------------------------------------------------------------- horaires : allumer / éteindre une machine à heure fixe
+SCHED_FILE = os.path.join(DATA_DIR, "schedules.json")
+SCHED_DAYS = {"all": range(7), "week": range(5), "weekend": (5, 6)}  # 0 = lundi
+_sched_lock = threading.Lock()
+
+
+def r_schedules(_):
+    return {"items": read_json(SCHED_FILE, [])}
+
+
+def r_schedules_save(d):
+    with _sched_lock:
+        items = read_json(SCHED_FILE, [])
+        op, sid = d.get("op"), str(d.get("id", ""))
+        if op == "add":
+            node, typ, vmid = guest_args(d)
+            if d.get("action") not in ("start", "shutdown"):
+                raise ApiError(400, "Action invalide")
+            if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", str(d.get("time", ""))):
+                raise ApiError(400, "Heure invalide")
+            if d.get("days") not in SCHED_DAYS:
+                raise ApiError(400, "Jours invalides")
+            items.append({"id": secrets.token_hex(4), "node": node, "type": typ, "vmid": vmid, "action": d["action"],
+                          "time": d["time"], "days": d["days"], "enabled": True})
+            if d.get("tz"):  # l'heure saisie est celle du téléphone : le serveur, lui, est en UTC
+                r_alert_settings({"tz": d["tz"]})
+        elif op == "toggle":
+            for it in items:
+                if it["id"] == sid:
+                    it["enabled"] = not it["enabled"]
+        elif op == "delete":
+            items = [it for it in items if it["id"] != sid]
+        else:
+            raise ApiError(400, "Demande invalide")
+        write_json(SCHED_FILE, items)
+    return {"items": items}
+
+
+def due_schedules(items, ln, done):
+    """Horaires à exécuter maintenant (heure locale ln) : l'heure est passée de moins de 10 min et pas encore faits aujourd'hui.
+    done : {id: "AAAA-MM-JJ"} mis à jour sur place."""
+    today, out = ln.strftime("%Y-%m-%d"), []
+    for it in items:
+        h, m = map(int, it["time"].split(":"))
+        late = (ln.hour * 60 + ln.minute) - (h * 60 + m)
+        if it.get("enabled") and ln.weekday() in SCHED_DAYS.get(it["days"], ()) and 0 <= late < 10 and done.get(it["id"]) != today:
+            done[it["id"]] = today
+            out.append(it)
+    return out
+
+
+def run_schedule(it, guests):
+    g = next((g for g in guests if g["vmid"] == it["vmid"] and g["type"] == it["type"]), None)
+    label = gname(g) if g else f"{'VM' if it['type'] == 'qemu' else 'CT'} {it['vmid']}"
+    verb = "Allumage" if it["action"] == "start" else "Extinction"
+    if not g:
+        return log_event("alert", f"{verb} programmé impossible", f"{label} n'existe plus")
+    if (it["action"] == "start") == (g.get("status") == "running"):
+        return  # déjà dans l'état voulu
+    try:
+        pve("POST", f"/nodes/{g['node']}/{it['type']}/{it['vmid']}/status/{it['action']}")
+        log_event("update", f"{verb} programmé : {label}", f"Horaire de {it['time']}", f"/#g={it['type']}/{it['vmid']}")
+    except ApiError as e:
+        log_event("alert", f"{verb} programmé en échec : {label}", e.msg, f"/#g={it['type']}/{it['vmid']}")
+
+
 def disk_items(nodes, storages, guests):
     items = [(f"node:{n['node']}", f"Le disque système de {n['node']}", n.get("disk", 0), n.get("maxdisk", 0)) for n in nodes]
     items += [(f"st:{s['node']}:{s['storage']}", f"Le stockage {s['storage']}", s.get("disk", 0), s.get("maxdisk", 0))
@@ -1344,6 +1410,11 @@ def monitor_once(ctx):
         nodes = pve("GET", "/nodes") or []
         storages = pve("GET", "/cluster/resources", {"type": "storage"}) or []
         alerts += check_disk(disk_items(nodes, storages, guests), s["disk_threshold"], state["disk"], now)
+    # horaires d'allumage / d'extinction (un arrêt programmé passe par « shutdown » : pas d'alerte « machine arrêtée »)
+    items = read_json(SCHED_FILE, [])
+    if items:
+        for it in due_schedules(items, local_now(s), state.setdefault("sched_done", {})):
+            run_schedule(it, guests)
     # apps de l'onglet Apps : toutes les 5 minutes (balayage des ports par SSH)
     if s["apps"] and now - ctx.get("apps_at", 0) >= 290:
         ctx["apps_at"] = now
@@ -2279,6 +2350,8 @@ ROUTES = {
     ("POST", "/api/store/uninstall"): r_store_uninstall,
     ("GET", "/api/events"): r_events,
     ("GET", "/api/disks"): r_disks,
+    ("GET", "/api/schedules"): r_schedules,
+    ("POST", "/api/schedules"): r_schedules_save,
     ("POST", "/api/settings"): r_app_settings,
     ("GET", "/api/chats"): r_chats,
     ("GET", "/api/chats/get"): r_chat_get,

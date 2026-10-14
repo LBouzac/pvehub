@@ -676,10 +676,54 @@ async function editResources() {
   guestCfg = await api("/api/guest?" + qs({ node: g.node, type: g.type, vmid: g.vmid })).catch(() => guestCfg);
   refresh();
 }
+// ---------- horaires d'allumage / d'extinction (exécutés par PVE Hub, à l'heure du téléphone)
+const SCHED_DAYS = { all: "tous les jours", week: "du lundi au vendredi", weekend: "le week-end" };
+const SCHED_ACT = { start: "Allumer", shutdown: "Éteindre" };
+const mySched = () => { const g = findGuest(S.guest); return (S.sched || []).filter(x => g && x.vmid == g.vmid && x.type === g.type); };
+function schedSummary() {
+  const l = mySched();
+  if (!S.sched) return "Chargement…";
+  if (!l.length) return "Allumer ou éteindre à heure fixe";
+  return l.map(x => `${x.enabled ? "" : "⏸ "}${SCHED_ACT[x.action]} à ${x.time}`).join(" · ");
+}
+function openSchedules() {
+  const g = findGuest(S.guest); if (!g) return;
+  const m = document.createElement("div"); m.className = "modal";
+  const draw = () => {
+    const l = mySched();
+    m.innerHTML = `<div class="card-sheet"><div class="grab"></div><div class="shead"><span style="width:60px"></span><h2>Horaires</h2><button class="navbtn" style="font-weight:600;width:60px;justify-content:flex-end" data-close>OK</button></div>
+      <div class="hdr">${esc(g.name || g.vmid)}</div><div class="group">
+      ${l.map(x => `<label class="cell"><div class="body"><div class="t">${SCHED_ACT[x.action]} à ${esc(x.time)}</div><div class="s">${SCHED_DAYS[x.days]}</div></div>
+        <button class="navbtn" data-sdel="${esc(x.id)}" aria-label="Supprimer" style="color:var(--red)">${I.trash}</button>
+        <span class="sw"><input type="checkbox" data-stog="${esc(x.id)}" ${x.enabled ? "checked" : ""} aria-label="Actif"><span></span></span></label>`).join("")}
+      <button class="cell icon tap act" data-sadd>${icoBox(I.plus, "accent")}<div class="body">Ajouter un horaire</div></button></div>
+      <div class="ftr">À ton heure, même app fermée : c'est le serveur PVE Hub qui s'en charge. « Éteindre » demande un arrêt propre, comme le bouton Éteindre. Rien n'est fait si la machine est déjà dans l'état voulu ; chaque action est notée dans le Journal.</div></div>`;
+  };
+  const save = async body => { try { S.sched = (await api("/api/schedules", { body })).items; } catch (e) { toast("❌ " + e.message); } draw(); if ($("#gopts")) $("#gopts").innerHTML = optsHtml(); };
+  draw();
+  m.addEventListener("change", e => { const id = e.target.dataset.stog; if (id) save({ op: "toggle", id }); });
+  m.addEventListener("click", async e => {
+    if (e.target === m || e.target.closest("[data-close]")) return m.remove();
+    const del = e.target.closest("[data-sdel]");
+    if (del) { e.preventDefault(); return save({ op: "delete", id: del.dataset.sdel }); }
+    if (e.target.closest("[data-sadd]")) {
+      const v = await alertForm("Nouvel horaire", esc(g.name || g.vmid), [
+        { name: "action", ph: "Action", options: Object.values(SCHED_ACT) },
+        { name: "time", label: "Heure", type: "time", value: "23:00", step: 60 },
+        { name: "days", ph: "Jours", options: Object.values(SCHED_DAYS) }]);
+      if (!v || !v.time) return;
+      const key = (o, val) => Object.keys(o).find(k => o[k] === val);
+      save({ op: "add", node: g.node, type: g.type, vmid: g.vmid, action: key(SCHED_ACT, v.action), time: v.time, days: key(SCHED_DAYS, v.days),
+        tz: Intl.DateTimeFormat().resolvedOptions().timeZone });
+    }
+  });
+  document.body.appendChild(m);
+}
 function optsHtml() {
   const on = guestCfg?.config?.onboot == 1;
   return `<label class="cell icon">${icoBox(I.power, "green")}<div class="body">Démarrer avec le serveur</div>
       <span class="sw"><input type="checkbox" data-onboot aria-label="Démarrer avec le serveur" ${on ? "checked" : ""} ${guestCfg?.config ? "" : "disabled"}><span></span></span></label>
+    <button class="cell icon tap" id="gSched">${icoBox(I.bell, "indigo")}<div class="body"><div class="t">Horaires</div><div class="s">${schedSummary()}</div></div>${I.chev}</button>
     ${S.ov.exec ? `<button class="cell icon tap" id="gExec">${icoBox(I.term, "gray")}<div class="body t">Lancer une commande</div>${I.chev}</button>` : ""}`;
 }
 function snapsHtml() {
@@ -706,6 +750,7 @@ async function loadGuestExtras() {
   const a = { node: g.node, type: g.type, vmid: g.vmid };
   rrd(a).then(r => { guestRrd = r.data; drawGuestCharts(); }).catch(() => {});
   api("/api/guest?" + qs(a)).then(r => { guestCfg = r; if ($("#gopts")) $("#gopts").innerHTML = optsHtml(); }).catch(() => {});
+  api("/api/schedules").then(r => { S.sched = r.items; if ($("#gopts")) $("#gopts").innerHTML = optsHtml(); }).catch(() => {});
   api("/api/snapshots?" + qs(a)).then(r => { guestSnaps = r.items; }).catch(e => { guestSnaps = { error: e.message }; })
     .finally(() => { if ($("#snaps")) $("#snaps").innerHTML = snapsHtml(); });
   api("/api/backups?" + qs(a)).then(r => { guestBk = r; }).catch(e => { guestBk = { error: e.message }; })
@@ -713,6 +758,7 @@ async function loadGuestExtras() {
 }
 $("#sheet").addEventListener("click", async e => {
   if (e.target.closest("#gRes")) return editResources();
+  if (e.target.closest("#gSched")) return openSchedules();
   if (e.target.closest("#gExec")) {
     const g = findGuest(S.guest); if (!g) return;
     history.back(); S.execTarget = JSON.stringify({ type: g.type, node: g.node, vmid: g.vmid }); setView("exec"); $("#cmd")?.focus(); return;
