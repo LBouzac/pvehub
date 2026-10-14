@@ -125,6 +125,23 @@ for ok in ("0 3 * * *", "*/15 * * * *", "@daily", "0 0 1 1 sun"):
     assert srv.RE_CRON_SCHED.match(ok), ok
 for bad in ("0 3 * *", "m h dom mon dow", "@hier", "0 3 * * * *", "0 3 * * $(id)"):
     assert not srv.RE_CRON_SCHED.match(bad), bad
+# store : en-tête d'un script communautaire (variables simples ou indentées selon l'OS choisi)
+HDR = '''#!/usr/bin/env bash
+# Source: https://jellyfin.org/
+APP="Jellyfin"
+var_tags="${var_tags:-media;arr}"
+var_cpu="${var_cpu:-2}"
+if [[ "${var_os:-}" == "alpine" ]]; then
+  var_ram="${var_ram:-256}"
+  var_disk="${var_disk:-1}"
+fi
+'''
+it = srv.parse_cs_header("jellyfin", HDR)
+assert it == {"id": "jellyfin", "name": "Jellyfin", "tags": ["media", "arr"], "cpu": 2, "ram": 256, "disk": 1,
+              "os": "", "site": "https://jellyfin.org/"}, it
+assert srv.parse_cs_header("x", "#!/bin/bash\necho rien") is None
+assert not srv.RE_SLUG.match("jellyfin; rm -rf /") and srv.RE_SLUG.match("home-assistant")
+
 # rapport du matin : une fois par jour à l'heure choisie ; un état partiel ne fait pas planter la surveillance
 import datetime, tempfile
 srv.DATA_DIR = tempfile.mkdtemp()

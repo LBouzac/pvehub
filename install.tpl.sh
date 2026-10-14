@@ -56,6 +56,10 @@ restart_app() {  # $1 = CTID
 
 ct_ip() { ctsh "$1" "ip -4 addr show eth0" | awk '/inet /{sub(/\/.*/,"",$2); print $2; exit}'; }
 
+# Droit réseau (SDN.Use) : nécessaire pour qu'un nouveau conteneur créé par le Store se branche sur vmbr0.
+# Le rôle PVESDNUser n'existe pas avant Proxmox 8 : on ignore l'erreur.
+grant_sdn() { pveum acl modify / --users pvehub@pve --roles PVESDNUser 2>/dev/null || true; }
+
 AUTH=/root/.ssh/authorized_keys
 setup_exec() {  # $1 = CTID — section Commandes : clé SSH du conteneur autorisée en root sur l'hôte
   local pub host
@@ -180,6 +184,7 @@ update)
   ctsh "$CTID" "if command -v apk >/dev/null; then apk add -q --no-cache py3-cryptography tzdata;
     else DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3-cryptography tzdata >/dev/null; fi" || echo "⚠️  Modules optionnels non installés (le reste fonctionne)."
   setup_exec "$CTID" || true
+  grant_sdn
   ctsh "$CTID" "chown -R pvehub /opt/pvehub"
   restart_app "$CTID"
   echo "✅ Mis à jour."; exit 0 ;;
@@ -242,6 +247,7 @@ APP_PASSWORD=$(ask "Mot de passe de l'app" "$(tr -dc 'a-km-zA-HJ-NP-Z2-9' </dev/
 say "Utilisateur et jeton API Proxmox (pvehub@pve)"
 pveum user add pvehub@pve --comment "PVE Hub" 2>/dev/null || true
 pveum acl modify / --users pvehub@pve --roles PVEVMAdmin,PVEDatastoreUser,PVEAuditor
+grant_sdn
 pveum user token remove pvehub@pve app 2>/dev/null || true
 TOKEN_SECRET=$(pveum user token add pvehub@pve app --privsep 0 --output-format json | grep -o '"value" *: *"[^"]*"' | cut -d'"' -f4)
 [ -n "$TOKEN_SECRET" ] || { echo "Impossible de créer le jeton API."; exit 1; }

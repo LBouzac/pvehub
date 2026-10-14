@@ -321,6 +321,7 @@ canvas{width:100%;height:120px;display:block}
 </div>
 
 <div class="push" id="maint"></div>
+<div class="push" id="store"></div>
 <div class="push" id="sheet" style="z-index:35"></div>
 <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
 
@@ -353,6 +354,7 @@ const I = {
   term: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 7 5 5-5 5M12 17h7"/></svg>',
   chat: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3c5 0 9 3.4 9 7.6s-4 7.6-9 7.6c-.9 0-1.8-.1-2.6-.3L5 20.5l.9-3.9C4.1 15.2 3 13 3 10.6 3 6.4 7 3 12 3"/></svg>',
   bell: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a6 6 0 0 0-6 6v3.6L4.3 15A1 1 0 0 0 5.2 16.5h13.6a1 1 0 0 0 .9-1.5L18 11.6V8a6 6 0 0 0-6-6m-2.5 16a2.5 2.5 0 0 0 5 0z"/></svg>',
+  bag: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 7h12l1 13H5zM9 7a3 3 0 0 1 6 0"/></svg>',
   plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
   gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1"/></svg>',
   wrench: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><path d="M14.7 6.3a4 4 0 0 0 5 5L21 13l-8 8-3-3 8-8-1.3-1.3a4 4 0 0 0-5-5L14 6z"/></svg>',
@@ -464,9 +466,10 @@ function setView(v) {
   ["dash", "guests", "apps", "exec", "chat"].forEach(k => $("#v-" + k).classList.toggle("hide", k !== v));
   $("#navTitle").textContent = TITLES[v];
   $("#navRight").innerHTML = (v === "chat" ? (S.ov?.hermes ? `<button class="navbtn" id="permBtn" aria-label="Autorisations">${I.shield}</button>` : "")
-    : v === "apps" ? `<button class="navbtn" id="editApps">${S.appsEdit ? "<b>OK</b>" : "Modifier"}</button>`
+    : v === "apps" ? `${S.appsEdit ? "" : `<button class="navbtn" id="storeBtn" aria-label="Store">${I.bag}</button>`}<button class="navbtn" id="editApps">${S.appsEdit ? "<b>OK</b>" : "Modifier"}</button>`
     : `<span class="live" id="live"><i></i>en direct</span>`) + `<button class="navbtn" id="setBtn" aria-label="Apparence et réglages" style="position:relative">${I.gear}${S.ver?.available ? '<i class="badge"></i>' : ""}</button>`;
   $("#setBtn").onclick = openSettings;
+  $("#storeBtn") && ($("#storeBtn").onclick = openStore);
   $("#editApps") && ($("#editApps").onclick = () => { S.appsEdit = !S.appsEdit; setView("apps"); });
   if (v === "apps" && (!S.apps || Date.now() - S.appsAt > 30000)) loadApps();
   if (v === "chat") { $("#permBtn") && ($("#permBtn").onclick = openPerms); renderChat(); scrollChat(); }
@@ -559,7 +562,7 @@ function openGuest(id) {
   renderGuest(); loadGuestExtras();
 }
 function closeGuest() { S.guest = null; $("#sheet").classList.remove("open"); }
-addEventListener("popstate", () => { if (S.guest) closeGuest(); else if (S.maintOpen) closeMaint(); });
+addEventListener("popstate", () => { if (S.guest) closeGuest(); else if (S.maintOpen) closeMaint(); else if (S.storeOpen) closeStore(); });
 
 function renderGuest() {
   const g = findGuest(S.guest); if (!g) return;
@@ -943,6 +946,158 @@ function openFromHash() {
   if (h === "maint") openMaint();
   else if (h === "report") openLatestReport();
   else if (h.startsWith("g=") && findGuest(h.slice(2))) { setView("guests"); openGuest(h.slice(2)); }
+}
+
+// ---------- store : applications à installer (communauté + modèles officiels TurnKey)
+S.store = { src: "community", tag: "", q: "", items: {}, jobs: store.get("pvehub.storeJobs", {}) };
+const CS_ICON = slug => `https://cdn.jsdelivr.net/gh/selfhst/icons/webp/${slug}.webp`;  // logos du catalogue communautaire
+function openStore() {
+  S.storeOpen = true; $("#store").scrollTop = 0; $("#store").classList.add("open"); history.pushState({ s: 1 }, "");
+  renderStore(); loadStore();
+}
+function closeStore() { S.storeOpen = false; $("#store").classList.remove("open"); clearTimeout(S.storePoll); }
+async function loadStore(refresh) {
+  const src = S.store.src;
+  try {
+    const r = await api("/api/store?" + qs({ source: src, ...(refresh ? { refresh: 1 } : {}) }));
+    S.store.items[src] = r; S.store.err = null;
+    clearTimeout(S.storePoll);
+    if (r.building && S.storeOpen) S.storePoll = setTimeout(() => loadStore(), 3000);  // catalogue en préparation
+  } catch (e) { S.store.err = e.message; }
+  if (S.storeOpen) renderStore();
+}
+function storeList() {
+  const r = S.store.items[S.store.src]; if (!r) return null;
+  const q = S.store.q.trim().toLowerCase();
+  return r.items.filter(i => (!S.store.tag || i.tags.includes(S.store.tag)) &&
+    (!q || i.name.toLowerCase().includes(q) || i.id.includes(q) || i.tags.some(t => t.includes(q)) || (i.desc || "").toLowerCase().includes(q)));
+}
+const res = i => [i.cpu && `${i.cpu} cœur${i.cpu > 1 ? "s" : ""}`, i.ram && (i.ram >= 1024 ? `${i.ram / 1024} Go` : `${i.ram} Mo`), i.disk && `${i.disk} Go disque`].filter(Boolean).join(" · ");
+function storeIcon(i) {
+  const letter = esc([...i.name][0]?.toUpperCase() || "?");
+  return `<span class="ico" style="background:var(--${appColor(i.name)});width:40px;height:40px;border-radius:10px;font-weight:600;font-size:18px;position:relative;overflow:hidden">${letter}${
+    S.store.src === "community" ? `<img src="${CS_ICON(i.id)}" alt="" loading="lazy" onerror="this.remove()" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;padding:6px;background:var(--card)">` : ""}</span>`;
+}
+function renderStore() {
+  const r = S.store.items[S.store.src], list = storeList(), sc = $("#store").scrollTop;
+  const running = Object.values(S.store.jobs).filter(j => j.status === "running");
+  const tags = r?.items ? Object.entries(r.items.flatMap(i => i.tags).reduce((a, t) => (a[t] = (a[t] || 0) + 1, a), {}))
+    .filter(([t]) => t !== "officiel").sort((a, b) => b[1] - a[1]).slice(0, 14).map(([t]) => t) : [];
+  let h = `<div class="navbar ${sc > 30 ? "scrolled" : ""}" id="snav"><div class="nt">Store</div>
+      <div class="side"><button class="navbtn" onclick="history.back()">${I.back}Apps</button></div>
+      <div class="side r">${S.store.src === "community" ? `<button class="navbtn" id="storeRefresh">Actualiser</button>` : ""}</div></div>
+    <h1 class="large">Store</h1>
+    <div class="seg" id="storeSrc"><button data-src="community" class="${S.store.src === "community" ? "on" : ""}">Communauté</button><button data-src="turnkey" class="${S.store.src === "turnkey" ? "on" : ""}">Officiel</button></div>
+    <div class="search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="storeQ" type="search" placeholder="Rechercher une app" value="${esc(S.store.q)}" aria-label="Rechercher une app"></div>
+    ${tags.length ? `<div class="chips" style="margin-bottom:12px" id="storeTags"><button class="chip" data-tag="" style="${S.store.tag ? "" : "background:var(--accent);color:var(--on-accent)"}">Toutes</button>${tags.map(t =>
+      `<button class="chip" data-tag="${esc(t)}" style="font-family:var(--font);${S.store.tag === t ? "background:var(--accent);color:var(--on-accent)" : ""}">${esc(t)}</button>`).join("")}</div>` : ""}
+    ${running.length ? `<div class="group" style="margin-bottom:14px">${running.map(j => `<button class="cell icon tap" data-job="${j.id}">${icoBox(I.backup, "accent")}<div class="body"><div class="t">Installation de ${esc(j.name)}…</div><div class="s">Touche pour suivre</div></div>${I.chev}</button>`).join("")}</div>` : ""}
+    <div class="group" id="storeList">`;
+  if (S.store.err) h += `<div class="cell"><div class="body mute">${esc(S.store.err)}</div></div>`;
+  else if (!r) h += `<div class="cell"><div class="body mute">Chargement…</div></div>`;
+  else if (r.error && !r.items.length) h += `<div class="cell"><div class="body mute">${esc(r.error)}</div></div>`;
+  else if (r.building && !r.items.length) h += `<div class="cell"><div class="body mute">Préparation du catalogue (première fois, quelques secondes)…</div></div>`;
+  else if (!list.length) h += `<div class="cell"><div class="body mute">Aucune app ne correspond</div></div>`;
+  else h += list.slice(0, 120).map(i => `<button class="cell tap" data-item="${esc(i.id)}" style="--inset:68px">${storeIcon(i)}<div class="body"><div class="t ell">${esc(i.name)}</div>
+      <div class="s ell">${esc(S.store.src === "turnkey" ? (i.desc || i.os) : [i.tags.join(", "), res(i)].filter(Boolean).join(" · "))}</div></div>${I.chev}</button>`).join("");
+  h += `</div><div class="ftr">${!list || (r?.building && !r.items.length) ? "" : list.length > 120 ? `${list.length} apps : affine la recherche pour voir les autres. ` : list ? `${list.length} app${list.length > 1 ? "s" : ""}. ` : ""}${
+    S.store.src === "community" ? `Scripts de la communauté <a href="https://github.com/community-scripts/ProxmoxVE" target="_blank" rel="noopener">Proxmox VE Helper-Scripts</a> (non officiels), installés avec leurs réglages par défaut.`
+      : "Modèles officiels de Proxmox (appliances TurnKey Linux), installés par l'API de Proxmox."}</div>
+    <div style="height:calc(40px + env(safe-area-inset-bottom))"></div>`;
+  $("#store").innerHTML = h; $("#store").scrollTop = sc;
+  const qi = $("#storeQ"); qi.oninput = () => { S.store.q = qi.value; const pos = qi.selectionStart; renderStore(); const n = $("#storeQ"); n.focus(); n.setSelectionRange(pos, pos); };
+  $("#storeRefresh") && ($("#storeRefresh").onclick = () => { S.store.items.community = null; renderStore(); loadStore(true); });
+}
+$("#store").addEventListener("scroll", () => $("#snav")?.classList.toggle("scrolled", $("#store").scrollTop > 30), { passive: true });
+$("#store").addEventListener("click", e => {
+  const src = e.target.closest("[data-src]"), tag = e.target.closest("[data-tag]"), it = e.target.closest("[data-item]"), jb = e.target.closest("[data-job]");
+  if (src) { S.store.src = src.dataset.src; S.store.tag = ""; S.store.q = ""; renderStore(); if (!S.store.items[S.store.src]) loadStore(); }
+  if (tag) { S.store.tag = tag.dataset.tag; renderStore(); }
+  if (it) openStoreItem(S.store.items[S.store.src].items.find(x => x.id === it.dataset.item), S.store.src);
+  if (jb) followJob(S.store.jobs[jb.dataset.job]);
+});
+const csCommand = id => `bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/${id}.sh)"`;
+async function openStoreItem(item, src) {
+  if (!item) return;
+  if (!S.storeOpts) try { S.storeOpts = (await api("/api/store/options")).nodes; } catch (e) { return toast("❌ " + e.message); }
+  const opts = S.storeOpts, m = document.createElement("div"); m.className = "modal";
+  const sel = (name, label, values, pick) => values.length ? `<label class="cell"><div class="body">${label}</div><select name="${name}" class="picker">${values.map(v =>
+    `<option ${v === pick ? "selected" : ""}>${esc(v)}</option>`).join("")}</select>${I.chev}</label>` : `<div class="cell"><div class="body">${label}</div><div class="v" style="color:var(--red)">aucun</div></div>`;
+  const draw = node => {
+    const o = opts.find(x => x.node === node) || opts[0] || { bridges: [], rootdir: [], vztmpl: [] };
+    const community = src === "community", canInstall = (!community || S.store.items.community?.exec) && o.rootdir.length && o.vztmpl.length;
+    m.innerHTML = `<form class="card-sheet"><div class="grab"></div><div class="shead"><button type="button" class="navbtn" data-close style="width:84px">Fermer</button><h2></h2><span style="width:84px"></span></div>
+      <div style="display:flex;align-items:center;gap:14px;margin:6px 16px 14px">${storeIcon(item).replace(/width:40px;height:40px/, "width:64px;height:64px")}
+        <div style="min-width:0"><div style="font-size:22px;font-weight:700" class="ell">${esc(item.name)}</div>
+        <div class="mute" style="font-size:14px">${community ? "Script communautaire" : "Modèle officiel · TurnKey"}${item.site ? ` · <a href="${esc(item.site)}" target="_blank" rel="noopener">site</a>` : ""}</div></div></div>
+      ${item.desc ? `<div class="ftr" style="margin:0 32px 6px;font-size:15px;color:var(--label)">${esc(item.desc)}</div>` : ""}
+      <div class="group">${[[community ? "Ressources par défaut" : "Ressources", community ? res(item) || "—" : "2 cœurs · 1 Go · 8 Go disque"], ["Système", item.os || "—"], community ? ["Catégories", item.tags.join(", ") || "—"] : null]
+        .filter(Boolean).map(([k, v]) => `<div class="cell"><div class="body">${k}</div><div class="v ell" style="max-width:60%;font-size:15px">${esc(v)}</div></div>`).join("")}</div>
+      <div class="hdr">Installation</div><div class="group">
+        ${opts.length > 1 ? sel("node", "Nœud", opts.map(x => x.node), o.node) : `<input type="hidden" name="node" value="${esc(o.node || "")}">`}
+        ${sel("storage", "Disque du conteneur", o.rootdir, o.rootdir.find(x => /lvm|zfs/i.test(x)) || o.rootdir[0])}
+        ${sel("tstorage", "Modèles", o.vztmpl, o.vztmpl.includes("local") ? "local" : o.vztmpl[0])}
+        ${sel("bridge", "Réseau", o.bridges, o.bridges.includes("vmbr0") ? "vmbr0" : o.bridges[0])}
+      </div>
+      <div class="ftr">${community ? "Ce script de la communauté s'exécute <b>en root sur ton serveur</b> et crée un nouveau conteneur avec ses réglages par défaut (environ 2 à 10 minutes)."
+        : "Proxmox télécharge le modèle puis crée et démarre un nouveau conteneur. Un mot de passe root sera généré."}</div>
+      <button class="bigbtn" ${canInstall ? "" : "disabled"}>Installer</button>
+      ${community && !S.store.items.community?.exec ? `<div class="ftr">Active la section Commandes pour installer depuis l'app.</div>` : ""}
+      ${community ? `<button type="button" class="bigbtn" data-copycmd style="background:var(--fill);color:var(--accent)">Copier la commande (pour la console)</button>
+        <div class="ftr">Pour choisir toi-même les réglages : colle cette commande dans le Shell de Proxmox et prends « Advanced ».</div>` : ""}
+    </form>`;
+  };
+  draw(opts[0]?.node);
+  const f = () => m.querySelector("form");
+  m.addEventListener("change", e => { if (e.target.name === "node") draw(e.target.value); });
+  m.addEventListener("click", e => {
+    if (e.target === m || e.target.closest("[data-close]")) m.remove();
+    if (e.target.closest("[data-copycmd]")) copyText(csCommand(item.id));
+  });
+  m.addEventListener("submit", async e => {
+    e.preventDefault();
+    const v = Object.fromEntries(new FormData(f()));
+    if (src === "community" && !await confirmBox(`Installer ${esc(item.name)} ?`, "Le script communautaire va s'exécuter en root sur ton serveur.", "Installer")) return;
+    try {
+      const r = await api("/api/store/install", { body: { source: src, id: item.id, ...v } });
+      S.store.jobs[r.job] = { id: r.job, name: item.name, source: src, status: "running", log: [] }; saveJobs();
+      m.remove(); followJob(S.store.jobs[r.job]);
+    } catch (err) { toast("❌ " + err.message, 6000); }
+  });
+  document.body.appendChild(m);
+}
+const saveJobs = () => store.set("pvehub.storeJobs", Object.fromEntries(Object.entries(S.store.jobs).slice(-10)));
+function followJob(job) {
+  const m = document.createElement("div"); m.className = "modal";
+  let stop = false;
+  const draw = () => {
+    const done = job.status !== "running";
+    m.innerHTML = `<div class="card-sheet"><div class="grab"></div><div class="shead"><span style="width:84px"></span><h2>${esc(job.name)}</h2><button class="navbtn" style="font-weight:600;width:84px;justify-content:flex-end" data-close>${done ? "OK" : "Masquer"}</button></div>
+      <div class="group" style="margin-top:12px"><div class="cell"><div class="body"><div class="t">${job.status === "running" ? "⏳ Installation en cours…" : job.status === "done" ? "✅ Installé" : "❌ Échec"}</div>
+        ${job.error ? `<div class="s" style="color:var(--red)">${esc(job.error)}</div>` : ""}${job.vmid ? `<div class="s">Conteneur ${job.vmid}</div>` : ""}</div></div>
+        ${job.url ? `<a class="cell tap act" href="${esc(job.url)}" target="_blank" rel="noopener"><div class="body">Ouvrir ${esc(job.url)}</div></a>` : ""}
+        ${job.password ? `<div class="cell"><div class="body">Mot de passe root</div><div class="v" style="font-family:var(--mono);font-size:15px">${esc(job.password)}</div></div>
+          <button class="cell tap act" data-copypw><div class="body">Copier le mot de passe</div></button>` : ""}</div>
+      ${job.password && done ? `<div class="ftr" style="line-height:1.4">Dernière étape : dans Proxmox, ouvre la <b>Console</b> du conteneur ${job.vmid} et connecte-toi en <b>root</b> avec ce mot de passe. L'assistant TurnKey te demande alors les mots de passe de l'application et termine sa configuration. Note ce mot de passe : il ne sera plus affiché.</div>` : ""}
+      ${done && job.status === "done" && !job.password ? `<div class="ftr">L'app apparaîtra dans l'onglet Apps à la prochaine recherche.</div>` : ""}
+      <div class="hdr">Journal</div><div class="group"><pre class="out" id="jobLog">${esc((job.log || []).slice(-40).join("\n") || "…")}</pre></div></div>`;
+    const pre = m.querySelector("#jobLog"); pre.scrollTop = pre.scrollHeight;
+  };
+  draw();
+  m.addEventListener("click", e => {
+    if (e.target === m || e.target.closest("[data-close]")) { stop = true; m.remove(); if (S.storeOpen) renderStore(); }
+    if (e.target.closest("[data-copypw]")) copyText(job.password);
+  });
+  document.body.appendChild(m);
+  (async () => {
+    while (!stop && job.status === "running") {
+      await new Promise(r => setTimeout(r, 2000));
+      try { Object.assign(job, await api("/api/store/job?" + qs({ id: job.id }))); }
+      catch (e) { job.status = "error"; job.error = e.message; }
+      if (job.status !== "running") { saveJobs(); S.apps = null; if (job.status === "done") toast(`✅ ${job.name} installé`); }
+      if (!stop) draw();
+    }
+  })();
 }
 
 // ---------- maintenance : sauvegardes + mises à jour des conteneurs

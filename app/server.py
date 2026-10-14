@@ -138,11 +138,28 @@ def hermes(method, path, body=None, stream=False, timeout=30):
         return json.loads(r.read() or b"{}")
 
 
-def run_ssh(remote, timeout=60):
+def ssh_cmd(remote):
     host = urllib.parse.urlsplit(PVE_URL).hostname
-    cmd = ["ssh", "-i", SSH_KEY, "-o", f"UserKnownHostsFile={SSH_DIR}/known_hosts",
-           "-o", "StrictHostKeyChecking=yes", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
-           "-o", "LogLevel=ERROR", f"root@{host}", remote]
+    return ["ssh", "-i", SSH_KEY, "-o", f"UserKnownHostsFile={SSH_DIR}/known_hosts",
+            "-o", "StrictHostKeyChecking=yes", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
+            "-o", "LogLevel=ERROR", f"root@{host}", remote]
+
+
+def run_ssh_stream(remote, on_line, timeout=3600):
+    """Comme run_ssh, mais chaque ligne de sortie est transmise dès qu'elle arrive (installations longues)."""
+    p = subprocess.Popen(ssh_cmd(remote), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    killer = threading.Timer(timeout, p.kill)
+    killer.start()
+    try:
+        for raw in p.stdout:
+            on_line(raw.decode("utf-8", "replace"))
+        return p.wait()
+    finally:
+        killer.cancel()
+
+
+def run_ssh(remote, timeout=60):
+    cmd = ssh_cmd(remote)
     try:
         p = subprocess.run(cmd, capture_output=True, timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -1008,6 +1025,206 @@ def monitor_once(ctx):
     return alerts
 
 
+# ---------------------------------------------------------------- store : catalogue
+CS_REPO = "community-scripts/ProxmoxVE"
+CS_TARBALL = f"https://codeload.github.com/{CS_REPO}/tar.gz/refs/heads/main"
+CATALOG_FILE = os.path.join(DATA_DIR, "catalog.json")
+_catalog = {"building": False, "error": None}
+RE_SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{0,60}$")
+
+
+def parse_cs_header(slug, text):
+    """Métadonnées d'un script communautaire depuis son en-tête (APP, var_tags, ressources, # Source)."""
+    def var(name):
+        m = re.search(rf'^\s*{name}="(?:\$\{{{name}:-)?([^"}}]*)\}}?"', text, re.M)  # indenté si dépend de l'OS choisi
+        return m.group(1) if m else ""
+    app = var("APP")
+    if not app:
+        return None
+    src = re.search(r"^# Source:\s*(https?://\S+)", text, re.M)
+    num = lambda n: int(var(n)) if var(n).isdigit() else None
+    return {"id": slug, "name": app, "tags": [t for t in var("var_tags").split(";") if t][:4],
+            "cpu": num("var_cpu"), "ram": num("var_ram"), "disk": num("var_disk"),
+            "os": " ".join(x for x in (var("var_os"), var("var_version")) if x), "site": src.group(1) if src else None}
+
+
+def build_catalog():
+    """Télécharge l'archive des scripts (une fois par semaine) et lit l'en-tête de chaque ct/*.sh."""
+    import tarfile
+    try:
+        req = urllib.request.Request(CS_TARBALL, headers={"User-Agent": "PVEHub"})
+        items = []
+        with urllib.request.urlopen(req, timeout=120) as r, tarfile.open(fileobj=r, mode="r|gz") as tar:
+            for m in tar:  # lecture en flux : seuls les petits fichiers ct/<slug>.sh sont décompressés
+                parts = m.name.split("/")
+                if m.isfile() and len(parts) == 3 and parts[1] == "ct" and parts[2].endswith(".sh") and m.size < 200_000:
+                    slug = parts[2][:-3]
+                    if RE_SLUG.match(slug):
+                        it = parse_cs_header(slug, tar.extractfile(m).read().decode("utf-8", "replace"))
+                        if it:
+                            items.append(it)
+        items.sort(key=lambda x: x["name"].lower())
+        write_json(CATALOG_FILE, {"at": int(time.time()), "items": items})
+        _catalog["error"] = None
+    except Exception as e:  # noqa: BLE001 — réseau, archive… : l'écran affiche l'erreur
+        _catalog["error"] = f"Catalogue injoignable : {getattr(e, 'reason', e)}"
+    finally:
+        _catalog["building"] = False
+
+
+def community_catalog(refresh=False):
+    cat = read_json(CATALOG_FILE, {})
+    if (refresh or not cat or time.time() - cat.get("at", 0) > 7 * 86400) and not _catalog["building"]:
+        _catalog["building"] = True
+        threading.Thread(target=build_catalog, daemon=True).start()
+    return cat
+
+
+def turnkey_catalog(node):
+    items = []
+    for a in pve("GET", f"/nodes/{node}/aplinfo") or []:
+        if a.get("section") == "turnkeylinux" and a.get("template"):
+            name = re.sub(r"^TurnKey\s+", "", a.get("headline") or a.get("package", ""))
+            items.append({"id": a["template"], "name": name, "desc": a.get("description", ""), "site": a.get("infopage"),
+                          "os": a.get("os", ""), "version": a.get("version", ""), "tags": ["officiel"]})
+    return sorted(items, key=lambda x: x["name"].lower())
+
+
+def r_store(q):
+    node = q.get("node") or (pve("GET", "/nodes") or [{}])[0].get("node")
+    if q.get("source") == "turnkey":
+        if not RE_NODE.match(node or ""):
+            raise ApiError(400, "Nœud invalide")
+        return {"items": turnkey_catalog(node)}
+    cat = community_catalog(bool(q.get("refresh")))
+    return {"items": cat.get("items", []), "at": cat.get("at"), "building": _catalog["building"], "error": _catalog["error"],
+            "exec": EXEC_ENABLED}
+
+
+def r_store_options(_):
+    """Valeurs proposées à l'installation : nœuds, stockages (disques / modèles), ponts réseau."""
+    out = []
+    for n in pve("GET", "/nodes") or []:
+        if n.get("status") != "online":
+            continue
+        st = pve("GET", f"/nodes/{n['node']}/storage", {"enabled": 1}) or []
+        bridges = [b["iface"] for b in pve("GET", f"/nodes/{n['node']}/network", {"type": "any_bridge"}) or [] if b.get("iface")]
+        out.append({"node": n["node"], "bridges": sorted(bridges) or ["vmbr0"],
+                    "rootdir": [s["storage"] for s in st if "rootdir" in (s.get("content") or "") and s.get("active", 1)],
+                    "vztmpl": [s["storage"] for s in st if "vztmpl" in (s.get("content") or "") and s.get("active", 1)]})
+    return {"nodes": out}
+
+
+# ---------------------------------------------------------------- store : installation
+_store_jobs = {}
+RE_ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b[()][A-Z0-9]")
+
+
+def wait_pve_task(node, upid, timeout=1800):
+    for _ in range(timeout // 2):
+        st = pve("GET", f"/nodes/{node}/tasks/{urllib.parse.quote(upid, safe='')}/status") or {}
+        if st.get("status") == "stopped":
+            return st.get("exitstatus")
+        time.sleep(2)
+    return "délai dépassé"
+
+
+def job_log(job, line):
+    line = RE_ANSI.sub("", line).rstrip("\n").split("\r")[-1].strip()  # couleurs et animations du terminal retirées
+    if not line:
+        return
+    job["log"] = (job["log"] + [line])[-300:]
+    m = re.search(r"(https?://\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?\S*)", line)
+    if m and "github" not in line:
+        job["url"] = m.group(1)
+    m = re.search(r"(?:Container ID|CT ID|CTID)\D{0,5}(\d{3,9})", line, re.I)
+    if m:
+        job["vmid"] = int(m.group(1))
+
+
+def install_community(job, slug, store, tstore, bridge):
+    url = f"https://raw.githubusercontent.com/{CS_REPO}/main/ct/{slug}.sh"
+    # mode=default + PHS_SILENT=1 : « installation par défaut » sans aucune question ; TERM=dumb : pas de menu whiptail
+    script = (f"export TERM=dumb PHS_SILENT=1 mode=default var_container_storage={store} var_template_storage={tstore} "
+              f"var_brg={bridge}; bash -c \"$(curl -fsSL {url})\"")
+    job_log(job, f"$ {script}")
+    code = run_ssh_stream(f"bash -c {shlex.quote(script)}", lambda l: job_log(job, l), timeout=2700)
+    if code != 0:
+        raise ApiError(502, f"Le script s'est arrêté avec le code {code}")
+
+
+def install_turnkey(job, node, template, name, store, tstore, bridge):
+    have = [c.get("volid", "") for c in pve("GET", f"/nodes/{node}/storage/{tstore}/content", {"content": "vztmpl"}) or []]
+    if not any(v.endswith("/" + template) for v in have):
+        job_log(job, f"Téléchargement du modèle {template}…")
+        st = wait_pve_task(node, pve("POST", f"/nodes/{node}/aplinfo", {"storage": tstore, "template": template}))
+        if st != "OK":
+            raise ApiError(502, f"Téléchargement du modèle : {st}")
+    vmid = int(pve("GET", "/cluster/nextid"))
+    password = "".join(secrets.choice("abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(16))
+    params = {"vmid": vmid, "ostemplate": f"{tstore}:vztmpl/{template}", "password": password,
+              "hostname": re.sub(r"[^a-z0-9-]", "-", name.lower()).strip("-")[:40] or f"ct{vmid}",
+              "cores": 2, "memory": 1024, "swap": 512, "rootfs": f"{store}:8", "unprivileged": 1, "features": "nesting=1",
+              "net0": f"name=eth0,bridge={bridge},ip=dhcp", "start": 1, "description": f"{name} (TurnKey) — installé par PVE Hub"}
+    job_log(job, f"Création du conteneur {vmid} ({name})…")
+    try:
+        upid = pve("POST", f"/nodes/{node}/lxc", params)
+    except ApiError as e:
+        if "feature" not in e.msg.lower() and "nesting" not in e.msg.lower():
+            raise
+        job_log(job, "Option nesting refusée, création sans.")  # selon la version, seul root@pam peut la régler
+        upid = pve("POST", f"/nodes/{node}/lxc", {k: v for k, v in params.items() if k != "features"})
+    st = wait_pve_task(node, upid)
+    if st != "OK":
+        raise ApiError(502, f"Création du conteneur : {st}")
+    job.update(vmid=vmid, password=password)
+    job_log(job, f"Conteneur {vmid} créé et démarré.")
+
+
+def run_store_job(job, kind, *args):
+    try:
+        (install_community if kind == "community" else install_turnkey)(job, *args)
+        job["status"] = "done"
+    except ApiError as e:
+        job.update(status="error", error=e.msg)
+    except Exception as e:  # noqa: BLE001
+        job.update(status="error", error=str(e)[:200])
+    job_log(job, "✓ Terminé" if job["status"] == "done" else f"✕ {job.get('error')}")
+
+
+def r_store_install(d):
+    source, item_id = d.get("source"), str(d.get("id", ""))
+    node, store, tstore, bridge = str(d.get("node", "")), str(d.get("storage", "")), str(d.get("tstorage", "")), str(d.get("bridge", ""))
+    if not RE_NODE.match(node) or not RE_STORE.match(store) or not RE_STORE.match(tstore) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,30}", bridge):
+        raise ApiError(400, "Nœud, stockage ou pont invalide")
+    if source == "community":
+        if not EXEC_ENABLED:
+            raise ApiError(403, "Active la section Commandes pour installer des scripts communautaires")
+        item = next((i for i in read_json(CATALOG_FILE, {}).get("items", []) if i["id"] == item_id), None)
+        if not item or not RE_SLUG.match(item_id):
+            raise ApiError(404, "Script inconnu")
+        args = ("community", item_id, store, tstore, bridge)
+    elif source == "turnkey":
+        item = next((i for i in turnkey_catalog(node) if i["id"] == item_id), None)
+        if not item:
+            raise ApiError(404, "Modèle inconnu")
+        args = ("turnkey", node, item_id, item["name"], store, tstore, bridge)
+    else:
+        raise ApiError(400, "Source inconnue")
+    job_id = secrets.token_hex(6)
+    _store_jobs[job_id] = job = {"id": job_id, "source": source, "name": item["name"], "status": "running",
+                                 "at": int(time.time()), "log": []}
+    threading.Thread(target=run_store_job, args=(job, *args), daemon=True).start()
+    return {"job": job_id}
+
+
+def r_store_job(q):
+    j = _store_jobs.get(str(q.get("id", "")))
+    if not j:
+        raise ApiError(404, "Installation inconnue (PVE Hub a peut-être redémarré)")
+    return j
+
+
 # ---------------------------------------------------------------- rapport du matin
 REPORT_PROMPT = """Tu es Hermes, l'assistant du serveur Proxmox de l'utilisateur. Rédige son rapport du matin en français,
 à partir de l'état ci-dessous. Format strict :
@@ -1552,6 +1769,10 @@ ROUTES = {
     ("POST", "/api/push/test"): r_push_test,
     ("POST", "/api/alerts"): r_alert_settings,
     ("GET", "/api/reports"): r_reports,
+    ("GET", "/api/store"): r_store,
+    ("GET", "/api/store/options"): r_store_options,
+    ("POST", "/api/store/install"): r_store_install,
+    ("GET", "/api/store/job"): r_store_job,
     ("POST", "/api/report/now"): r_report_now,
     ("GET", "/api/version"): r_version,
     ("GET", "/api/remote"): r_remote,

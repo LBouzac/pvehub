@@ -6,6 +6,8 @@ Petite app web pour piloter ton Proxmox depuis le téléphone, avec l'agent IA H
 - **Machines** (VM et conteneurs) : démarrer, éteindre, redémarrer, forcer l'arrêt, snapshots, sauvegardes
 - **Apps** : tes services web (Home Assistant, Jellyfin…) en grille d'icônes, détectés automatiquement, avec un point
   vert s'ils répondent ; renommer, changer l'adresse, masquer, ajouter tes propres liens
+- **Store** : installer de nouvelles apps — environ 600 scripts de la communauté (Home Assistant, Jellyfin, Pi-hole…)
+  et les modèles officiels TurnKey de Proxmox — avec recherche, catégories et suivi de l'installation en direct
 - **Commandes** : lancer une commande sur l'hôte, dans un conteneur ou une VM, et voir le résultat
 - **Tâches planifiées** : la crontab de l'hôte et de chaque conteneur, en clair (« Tous les jours à 03:00 »)
 - **Maintenance** : sauvegardes planifiées, ancienneté de la dernière sauvegarde de chaque machine, paquets à mettre
@@ -29,6 +31,7 @@ Python seul, aucune dépendance. L'app ne rafraîchit les données que lorsqu'el
 4. [Mettre à jour](#4-mettre-à-jour)
 5. [Accès depuis l'extérieur (Tailscale)](#5-accès-depuis-lextérieur-tailscale)
    - [Notifications sur le téléphone](#notifications-sur-le-téléphone)
+   - [Store : installer de nouvelles apps](#store--installer-de-nouvelles-apps)
 6. [Passer d'un ancien conteneur Debian à Alpine](#6-passer-dun-ancien-conteneur-debian-à-alpine)
 7. [Modifier la configuration](#7-modifier-la-configuration)
 8. [Dépannage](#8-dépannage)
@@ -197,6 +200,28 @@ Les notifications ont besoin de l'adresse HTTPS (Tailscale, ci-dessus). Sur iPho
 Le serveur vérifie tout cela chaque minute, même quand l'app est fermée. Toucher une notification ouvre directement
 la machine concernée ou l'écran Maintenance. Répète l'étape 3 sur chaque appareil qui doit recevoir les alertes.
 
+## Store : installer de nouvelles apps
+
+Onglet **Apps** → icône de sac en haut à droite.
+
+- **Communauté** : les [Proxmox VE Helper-Scripts](https://github.com/community-scripts/ProxmoxVE) (non officiels,
+  mais la référence du homelab). L'app lit leur catalogue une fois par semaine (bouton Actualiser pour forcer).
+  1. Choisis une app, vérifie le disque, le stockage des modèles et le réseau proposés, puis **Installer**.
+  2. Le script s'exécute **en root sur l'hôte**, avec ses réglages par défaut (« Default Install ») : il crée un
+     nouveau conteneur. Le journal défile en direct ; à la fin, l'adresse de l'app s'affiche.
+  3. Tu peux masquer la fenêtre pendant l'installation : elle reste visible en haut du Store.
+  - Pour choisir toi-même les réglages (taille, IP fixe…) : **Copier la commande**, colle-la dans le Shell de
+    Proxmox et choisis « Advanced ».
+  - Nécessite la section Commandes.
+- **Officiel** : les appliances TurnKey Linux du catalogue de Proxmox (WordPress, Nextcloud, GitLab…), installées
+  uniquement par l'API de Proxmox.
+  1. **Installer** : Proxmox télécharge le modèle, crée le conteneur (2 cœurs, 1 Go, 8 Go) et le démarre.
+  2. Note le **mot de passe root** affiché : il ne sera plus montré.
+  3. Dans Proxmox, ouvre la **Console** du nouveau conteneur et connecte-toi en root : l'assistant TurnKey demande
+     les mots de passe de l'application et termine la configuration.
+
+Les nouvelles apps apparaissent ensuite dans l'onglet Apps (« Rechercher de nouvelles apps »).
+
 ## 6. Passer d'un ancien conteneur Debian à Alpine
 
 Les installations d'avant octobre 2026 utilisaient Debian (128 Mo, 2 Go). Pour passer à Alpine, **depuis le Shell
@@ -268,6 +293,9 @@ Anciens conteneurs Debian : `journalctl -u pvehub -n 50` et `systemctl restart p
 | Le rapport du matin arrive à la mauvaise heure | Change l'heure une fois dans Réglages depuis le téléphone : il transmet son fuseau horaire. Mets aussi PVE Hub à jour (paquet `tzdata`) |
 | Le rapport est « factuel » au lieu d'être rédigé par Hermes | Hermes n'a pas répondu à temps : regarde le journal (« Rapport : Hermes indisponible… ») et la section 3 |
 | Plus de notifications après avoir supprimé l'icône | Normal : l'abonnement est lié à l'icône. Rajoute l'app à l'écran d'accueil et réactive |
+| Store : « Permission check failed … SDN.Use » | Mets PVE Hub à jour : la mise à jour donne le droit réseau (rôle PVESDNUser) à l'utilisateur `pvehub@pve` |
+| Store : « Catalogue injoignable » | Le conteneur doit pouvoir joindre `codeload.github.com`. Réessaie avec Actualiser |
+| Store : l'installation d'un script communautaire échoue ou bloque | Le journal montre où. Relance-la depuis le Shell avec « Copier la commande » pour voir les questions éventuelles |
 | Le conteneur ne démarre pas à l'installation | `pct start <ID> --debug` et regarde les dernières lignes |
 
 ## 9. Désinstaller
