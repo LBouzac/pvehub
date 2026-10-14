@@ -116,7 +116,7 @@ def pve(method, path, params=None, timeout=30):
         raise ApiError(502, f"Proxmox injoignable : {getattr(e, 'reason', e)}")
 
 
-def hermes(method, path, body=None, stream=False):
+def hermes(method, path, body=None, stream=False, timeout=30):
     if not HERMES_URL:
         raise ApiError(503, "Hermes n'est pas configuré (HERMES_URL)")
     data = json.dumps(body).encode() if body is not None else None
@@ -127,7 +127,7 @@ def hermes(method, path, body=None, stream=False):
     if stream:
         req.add_header("Accept", "text/event-stream")
     try:
-        r = urllib.request.urlopen(req, timeout=900 if stream else 30)
+        r = urllib.request.urlopen(req, timeout=900 if stream else timeout)
     except urllib.error.HTTPError as e:
         raise ApiError(502, f"Hermes : {e.code} {e.read().decode(errors='replace')[:200]}")
     except (urllib.error.URLError, OSError) as e:
@@ -795,7 +795,19 @@ def send_push(title, body, url="/", tag=None):
     return ok
 
 
-ALERT_DEFAULTS = {"stopped": True, "disk": True, "disk_threshold": 90, "backup": True, "updates": True}
+ALERT_DEFAULTS = {"stopped": True, "disk": True, "disk_threshold": 90, "backup": True, "updates": True,
+                  "report": False, "report_time": "08:00", "tz": os.environ.get("TZ") or "UTC"}
+REPORTS_FILE = os.path.join(DATA_DIR, "reports.json")  # derniers rapports du matin
+
+
+def local_now(s=None):
+    """Heure locale de l'utilisateur (fuseau envoyé par son téléphone ; le conteneur est en UTC)."""
+    import datetime
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.datetime.now(ZoneInfo((s or alert_settings())["tz"]))
+    except Exception:  # noqa: BLE001 — fuseau inconnu ou tzdata absent : heure du conteneur
+        return datetime.datetime.now()
 
 
 def alert_settings():
@@ -840,9 +852,21 @@ def r_push_test(_):
 
 def r_alert_settings(d):
     s = alert_settings()
-    for k in ("stopped", "disk", "backup", "updates"):
+    for k in ("stopped", "disk", "backup", "updates", "report"):
         if k in d:
             s[k] = bool(d[k])
+    if "report_time" in d:
+        if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", str(d["report_time"])):
+            raise ApiError(400, "Heure invalide")
+        s["report_time"] = d["report_time"]
+    if "tz" in d:
+        tz = str(d["tz"])
+        try:
+            from zoneinfo import ZoneInfo
+            ZoneInfo(tz)
+            s["tz"] = tz
+        except Exception:  # noqa: BLE001 — tzdata absent ou nom inconnu : on garde l'ancien
+            pass
     if "disk_threshold" in d:
         try:
             s["disk_threshold"] = max(50, min(99, int(d["disk_threshold"])))
@@ -938,7 +962,8 @@ def monitor_once(ctx):
     now = int(time.time())
     s = alert_settings()
     with _push_lock:
-        state = read_json(ALERTS_FILE, {}).get("state") or {"disk": {}, "failed_end": now, "updates_sent": now}
+        # valeurs par défaut fusionnées : un état ancien ou partiel ne doit pas faire planter la surveillance
+        state = {"disk": {}, "failed_end": now, "updates_sent": now, **(read_json(ALERTS_FILE, {}).get("state") or {})}
     before = json.dumps(state, sort_keys=True)
     guests = [g for g in pve("GET", "/cluster/resources", {"type": "vm"}) or [] if not g.get("template")]
     tasks = pve("GET", "/cluster/tasks") or []
@@ -953,12 +978,13 @@ def monitor_once(ctx):
     a, state["failed_end"] = check_failed_backups(tasks, state.get("failed_end", now))
     alerts += a if s["backup"] else []
     # une fois par jour, en matinée : machines couvertes par une sauvegarde planifiée mais pas sauvegardées depuis 7 jours
-    today = time.strftime("%Y-%m-%d", time.localtime(now))
-    if s["backup"] and state.get("late_day") != today and time.localtime(now).tm_hour >= 9:
+    ln = local_now(s)
+    today = ln.strftime("%Y-%m-%d")
+    if s["backup"] and state.get("late_day") != today and ln.hour >= 9:
         state["late_day"] = today
         alerts += check_late_backups(r_maint_backups({})["guests"], now)
-    # résumé hebdomadaire des mises à jour, en matinée (heure du conteneur)
-    if s["updates"] and EXEC_ENABLED and now - state.get("updates_sent", now) > 7 * 86400 and time.localtime(now).tm_hour >= 9:
+    # résumé hebdomadaire des mises à jour, en matinée
+    if s["updates"] and EXEC_ENABLED and now - state.get("updates_sent", now) > 7 * 86400 and ln.hour >= 9:
         state["updates_sent"] = now
         scan_updates()
         cts = [c for c in _updates["cts"].values() if c["packages"]]
@@ -969,12 +995,113 @@ def monitor_once(ctx):
             alerts.append(("Mises à jour disponibles", " et ".join(parts) + " à mettre à jour.", "/#maint"))
     for title, body, url in alerts:
         send_push(title, body, url, tag=title)
+    state["log"] = (state.get("log", []) + [{"ts": now, "title": t, "body": b} for t, b, _ in alerts])[-50:]
+    # rapport du matin, rédigé en arrière-plan (Hermes peut mettre une minute)
+    if s["report"] and state.get("report_day") != today and ln.strftime("%H:%M") >= s["report_time"]:
+        state["report_day"] = today
+        threading.Thread(target=generate_report, daemon=True).start()
     if json.dumps(state, sort_keys=True) != before:
         with _push_lock:
             cur = read_json(ALERTS_FILE, {})
             cur["state"] = state
             write_json(ALERTS_FILE, cur)
     return alerts
+
+
+# ---------------------------------------------------------------- rapport du matin
+REPORT_PROMPT = """Tu es Hermes, l'assistant du serveur Proxmox de l'utilisateur. Rédige son rapport du matin en français,
+à partir de l'état ci-dessous. Format strict :
+- 1re ligne : une seule phrase de moins de 110 caractères qui résume l'essentiel (elle sert de notification ;
+  « Tout va bien » si rien ne mérite son attention). Pas de titre, pas de markdown sur cette ligne.
+- une ligne vide
+- 3 à 8 puces courtes : d'abord ce qui mérite son attention (et quoi faire), puis le reste en bref.
+N'exécute aucune commande et ne propose pas de bloc d'action : c'est un rapport à lire."""
+
+
+def report_facts():
+    """État du serveur en texte, et liste des points à vérifier (pour le repli sans IA)."""
+    s, now, facts, issues = alert_settings(), int(time.time()), [], []
+    try:
+        facts.append(cluster_summary())
+    except ApiError as e:
+        issues.append(f"Proxmox injoignable : {e.msg}")
+    try:
+        b = r_maint_backups({})
+        facts.append("Sauvegardes planifiées : " + ("; ".join(f"{j['schedule']} ({'toutes' if j['all'] else j['vmid']} → {j['storage']})"
+                                                         for j in b["jobs"]) or "aucune"))
+        if not b["jobs"]:
+            issues.append("aucune sauvegarde planifiée")
+        for f in b["failed"]:
+            if now - f["starttime"] < 86400:
+                issues.append(f"sauvegarde en échec ({f['status']})")
+        for g in b["guests"]:
+            age = f"il y a {(now - g['last']['ctime']) // 3600} h" if g["last"] else "jamais"
+            facts.append(f"- dernière sauvegarde de {g['name'] or g['vmid']} : {age}{'' if g['planned'] else ' (non planifiée)'}")
+            if g["planned"] and (not g["last"] or now - g["last"]["ctime"] > 7 * 86400):
+                issues.append(f"{g['name'] or g['vmid']} pas sauvegardée depuis 7 jours")
+    except ApiError:
+        pass
+    try:
+        for _key, label, used, total in disk_items(pve("GET", "/nodes") or [], pve("GET", "/cluster/resources", {"type": "storage"}) or [],
+                                                   pve("GET", "/cluster/resources", {"type": "vm"}) or []):
+            if total and used / total >= 0.7:
+                facts.append(f"{label} : {100 * used / total:.0f} % utilisé")
+                if 100 * used / total >= s["disk_threshold"]:
+                    issues.append(f"{label[0].lower() + label[1:]} plein à {100 * used / total:.0f} %")
+    except ApiError:
+        pass
+    cts = [c for c in _updates["cts"].values() if c["packages"]]
+    if cts:
+        facts.append("Mises à jour en attente : " + ", ".join(f"{c['name']} ({len(c['packages'])})" for c in cts))
+    recent = [a for a in read_json(ALERTS_FILE, {}).get("state", {}).get("log", []) if now - a["ts"] < 86400]
+    facts.append("Alertes des dernières 24 h : " + ("; ".join(f"{a['title']} — {a['body']}" for a in recent) or "aucune"))
+    return "\n".join(facts), issues
+
+
+def generate_report(push=True):
+    """Rédige le rapport (Hermes, sinon version factuelle), l'enregistre et l'envoie en notification."""
+    facts, issues = report_facts()
+    text, by = None, "hermes"
+    if HERMES_URL:
+        try:
+            r = hermes("POST", "/v1/chat/completions", {"model": "hermes-agent", "messages": [
+                {"role": "system", "content": REPORT_PROMPT + "\n\nÉtat du serveur :\n" + facts},
+                {"role": "user", "content": f"Rapport du matin du {local_now().strftime('%d/%m/%Y')}"}]}, timeout=300)
+            text = (r["choices"][0]["message"]["content"] or "").strip() or None
+        except (ApiError, KeyError, IndexError, TypeError) as e:
+            print("Rapport : Hermes indisponible,", getattr(e, "msg", e), file=sys.stderr)
+    if not text:  # repli sans IA : les faits bruts
+        by = "local"
+        head = "Tout va bien ✓" if not issues else f"{len(issues)} point{'s' if len(issues) > 1 else ''} à vérifier : " + ", ".join(issues)
+        text = head[:150] + "\n\n" + facts
+    summary = re.sub(r"[*_#`>]", "", next(l for l in text.splitlines() if l.strip())).strip()[:160]
+    rep = {"id": secrets.token_hex(5), "ts": int(time.time()), "summary": summary, "text": text, "by": by}
+    with _push_lock:
+        write_json(REPORTS_FILE, ([rep] + read_json(REPORTS_FILE, []))[:14])
+    if push:
+        send_push("☀️ Rapport du matin", summary, "/#report", tag="report")
+    return rep
+
+
+def r_reports(_):
+    return {"reports": read_json(REPORTS_FILE, [])}
+
+
+_report_busy = threading.Lock()
+
+
+def r_report_now(_):
+    """Lance la rédaction en arrière-plan ; l'app attend que le rapport apparaisse dans /api/reports."""
+    if not _report_busy.acquire(blocking=False):
+        raise ApiError(409, "Un rapport est déjà en cours de rédaction")
+
+    def run():
+        try:
+            generate_report(push=True)
+        finally:
+            _report_busy.release()
+    threading.Thread(target=run, daemon=True).start()
+    return {"started": int(time.time())}
 
 
 # ---------------------------------------------------------------- accès à distance (Tailscale)
@@ -1424,6 +1551,8 @@ ROUTES = {
     ("POST", "/api/push/unsubscribe"): r_push_unsubscribe,
     ("POST", "/api/push/test"): r_push_test,
     ("POST", "/api/alerts"): r_alert_settings,
+    ("GET", "/api/reports"): r_reports,
+    ("POST", "/api/report/now"): r_report_now,
     ("GET", "/api/version"): r_version,
     ("GET", "/api/remote"): r_remote,
     ("POST", "/api/update"): r_update,

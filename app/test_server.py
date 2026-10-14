@@ -125,4 +125,24 @@ for ok in ("0 3 * * *", "*/15 * * * *", "@daily", "0 0 1 1 sun"):
     assert srv.RE_CRON_SCHED.match(ok), ok
 for bad in ("0 3 * *", "m h dom mon dow", "@hier", "0 3 * * * *", "0 3 * * $(id)"):
     assert not srv.RE_CRON_SCHED.match(bad), bad
+# rapport du matin : une fois par jour à l'heure choisie ; un état partiel ne fait pas planter la surveillance
+import datetime, tempfile
+srv.DATA_DIR = tempfile.mkdtemp()
+srv.ALERTS_FILE, srv.REPORTS_FILE = os.path.join(srv.DATA_DIR, "a.json"), os.path.join(srv.DATA_DIR, "r.json")
+srv.write_json(srv.ALERTS_FILE, {"state": {"log": []}})
+srv.pve = lambda m, path, params=None, timeout=30: []
+started = []
+srv.generate_report = lambda push=True: started.append(1)
+srv.threading.Thread = lambda target, daemon: type("T", (), {"start": lambda self: target()})()
+srv.r_alert_settings({"report": True, "report_time": "08:00"})
+for hhmm, day, expect in (("07:59", 14, 0), ("08:00", 14, 1), ("21:00", 14, 1), ("08:05", 15, 2)):
+    h, m = map(int, hhmm.split(":"))
+    srv.local_now = lambda s=None, h=h, m=m, day=day: datetime.datetime(2026, 10, day, h, m)
+    srv.monitor_once({"prev": {}, "first": False})
+    assert len(started) == expect, (hhmm, day, started)
+try:
+    srv.r_alert_settings({"report_time": "25:00"})
+    raise AssertionError("heure invalide acceptée")
+except srv.ApiError:
+    pass
 print("ok")

@@ -941,6 +941,7 @@ function openFromHash() {
   const h = decodeURIComponent(location.hash.slice(1)); if (!h || !S.ov) return;
   history.replaceState(null, "", location.pathname);
   if (h === "maint") openMaint();
+  else if (h === "report") openLatestReport();
   else if (h.startsWith("g=") && findGuest(h.slice(2))) { setView("guests"); openGuest(h.slice(2)); }
 }
 
@@ -1154,11 +1155,35 @@ function notifHtml() {
     ${sw("disk", "Disque ou stockage plein")}
     ${s.disk ? `<label class="cell"><div class="body">Seuil</div><select class="picker" data-alert="disk_threshold" style="direction:ltr;text-align-last:right">${[80, 85, 90, 95].map(v => `<option value="${v}" ${s.disk_threshold == v ? "selected" : ""}>${v} %</option>`).join("")}</select>${I.chev}</label>` : ""}
     ${sw("backup", "Sauvegardes", "Échec, ou machine non sauvegardée depuis 7 jours")}
-    ${sw("updates", "Résumé des mises à jour", "Une fois par semaine")}`;
+    ${sw("updates", "Résumé des mises à jour", "Une fois par semaine")}
+    ${sw("report", "Rapport du matin", S.ov?.hermes ? "Hermes résume l'état du serveur chaque jour" : "Résumé de l'état du serveur chaque jour")}
+    ${s.report ? `<label class="cell"><div class="body">Heure du rapport</div><input type="time" class="picker" data-alert="report_time" value="${esc(s.report_time)}" style="direction:ltr"></label>` : ""}
+    <button class="cell tap act" id="reportNow"><div class="body">Recevoir le rapport maintenant</div></button>`;
 }
 function notifFooter() {
   const n = S.push?.devices;
   return S.push?.available ? `<div class="ftr">${n ? `${n} appareil${n > 1 ? "s" : ""} abonné${n > 1 ? "s" : ""}. ` : "Aucun appareil abonné pour l'instant. "}Les alertes sont vérifiées chaque minute par le serveur, même quand l'app est fermée.</div>` : "";
+}
+
+// ---------- rapport du matin
+async function reportNow() {
+  let r; try { r = await api("/api/report/now", { body: {} }); } catch (e) { return toast("❌ " + e.message); }
+  const t = toast(S.ov?.hermes ? "⏳ Hermes rédige le rapport…" : "⏳ Préparation du rapport…", 600000);
+  for (let i = 0; i < 100; i++) {  // jusqu'à 5 min : Hermes peut prendre son temps
+    await new Promise(res => setTimeout(res, 3000));
+    try { const rep = (await api("/api/reports")).reports.find(x => x.ts >= r.started); if (rep) { t.remove(); return openReport(rep); } } catch {}
+  }
+  t.remove(); toast("Le rapport n'est pas arrivé : regarde le journal de PVE Hub.", 7000);
+}
+async function openLatestReport() {
+  try { const rep = (await api("/api/reports")).reports[0]; if (rep) openReport(rep); } catch {}
+}
+function openReport(rep) {
+  const when = new Date(rep.ts * 1000).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
+  if (!S.ov?.hermes) return showPackages("Rapport du matin", rep.text.split("\n"));
+  // le rapport entre dans la conversation : on peut répondre à Hermes juste en dessous
+  if (!S.chat.some(m => m.reportId === rep.id)) { S.chat.push({ role: "assistant", content: `☀️ **Rapport du ${when}**\n\n${rep.text}`, reportId: rep.id }); saveChat(); }
+  setView("chat");
 }
 
 // ---------- accès à distance
@@ -1223,7 +1248,10 @@ function openSettings() {
   pushState().then(() => { if (m.isConnected) draw(); });
   m.onchange = async e => {  // réglages des alertes (communs à tous les appareils)
     const k = e.target.dataset.alert; if (!k) return;
-    try { S.push.settings = (await api("/api/alerts", { body: { [k]: e.target.type === "checkbox" ? e.target.checked : +e.target.value } })).settings; }
+    const v = e.target.type === "checkbox" ? e.target.checked : k === "report_time" ? e.target.value : +e.target.value;
+    if (k === "report_time" && !v) return;
+    // le fuseau du téléphone accompagne chaque réglage : le conteneur, lui, est à l'heure UTC
+    try { S.push.settings = (await api("/api/alerts", { body: { [k]: v, tz: Intl.DateTimeFormat().resolvedOptions().timeZone } })).settings; }
     catch (err) { toast("❌ " + err.message); }
     draw();
   };
@@ -1231,6 +1259,7 @@ function openSettings() {
     if (e.target === m || e.target.closest("[data-close]")) return m.remove();
     const cp = e.target.closest("[data-copy]"); if (cp) return copyText(cp.dataset.copy);
     if (e.target.closest("#pushOn")) { await enablePush(); return draw(); }
+    if (e.target.closest("#reportNow")) { m.remove(); return reportNow(); }
     if (e.target.closest("#pushOff")) { await disablePush(); return draw(); }
     if (e.target.closest("#pushTest")) {
       try { const r = await api("/api/push/test", { body: {} }); toast(`🔔 Envoyée à ${r.sent} appareil${r.sent > 1 ? "s" : ""}`); } catch (err) { toast("❌ " + err.message, 6000); }

@@ -14,6 +14,8 @@ Petite app web pour piloter ton Proxmox depuis le téléphone, avec l'agent IA H
   l'autorisation avant ses commandes sensibles
 - **Notifications** sur le téléphone : machine arrêtée toute seule, disque plein, sauvegarde en échec ou en retard,
   résumé hebdomadaire des mises à jour
+- **Rapport du matin** : chaque jour à l'heure choisie, Hermes résume l'état du serveur en une notification ;
+  un tap l'ouvre dans la conversation pour lui répondre
 - **Mise à jour de l'app** en un tap, thèmes clair/sombre, couleurs au choix
 
 Ultra léger : un conteneur Alpine Linux (64 Mo de RAM alloués, environ 30 Mo utilisés, 1 Go de disque),
@@ -186,6 +188,12 @@ Les notifications ont besoin de l'adresse HTTPS (Tailscale, ci-dessus). Sur iPho
      mais pas sauvegardées depuis 7 jours ;
    - **Résumé des mises à jour** : une fois par semaine, en matinée.
 
+   - **Rapport du matin** : chaque jour à l'heure choisie (heure de ton téléphone), Hermes lit l'état du serveur
+     (machines, sauvegardes de la nuit, disques, mises à jour, alertes des dernières 24 h) et t'envoie l'essentiel
+     en une phrase. Toucher la notification ouvre le rapport complet dans la conversation : tu peux lui répondre
+     directement (« que dois-je faire pour… »). Sans Hermes, ou s'il ne répond pas, tu reçois un rapport factuel.
+     **Recevoir le rapport maintenant** permet d'essayer tout de suite.
+
 Le serveur vérifie tout cela chaque minute, même quand l'app est fermée. Toucher une notification ouvre directement
 la machine concernée ou l'écran Maintenance. Répète l'étape 3 sur chaque appareil qui doit recevoir les alertes.
 
@@ -257,6 +265,8 @@ Anciens conteneurs Debian : `journalctl -u pvehub -n 50` et `systemctl restart p
 | Notifications « Indisponible ici » | Ouvre l'app en HTTPS (adresse Tailscale) et depuis son icône de l'écran d'accueil, pas depuis Safari (iOS 16.4+) |
 | Notifications « Mise à jour nécessaire » | Mets PVE Hub à jour : le module `py3-cryptography` sera installé |
 | La notification de test n'arrive pas | Le conteneur doit pouvoir joindre Internet (`web.push.apple.com` sur iPhone). Regarde le journal (« Notification refusée… »). Vérifie aussi Réglages de l'iPhone → Notifications → PVE Hub |
+| Le rapport du matin arrive à la mauvaise heure | Change l'heure une fois dans Réglages depuis le téléphone : il transmet son fuseau horaire. Mets aussi PVE Hub à jour (paquet `tzdata`) |
+| Le rapport est « factuel » au lieu d'être rédigé par Hermes | Hermes n'a pas répondu à temps : regarde le journal (« Rapport : Hermes indisponible… ») et la section 3 |
 | Plus de notifications après avoir supprimé l'icône | Normal : l'abonnement est lié à l'icône. Rajoute l'app à l'écran d'accueil et réactive |
 | Le conteneur ne démarre pas à l'installation | `pct start <ID> --debug` et regarde les dernières lignes |
 
