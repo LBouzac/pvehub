@@ -32,6 +32,20 @@ for bad in ("javascript:alert(1)", "ftp://x", "http://", "x" * 400):
     except srv.ApiError:
         pass
 assert srv.clean_url(" http://192.168.1.1 ") == "http://192.168.1.1"
+# is_up : un port qui ne parle pas HTTP ne doit jamais faire planter la page (bug « Erreur interne »)
+import socket, threading
+def _fake_tcp(reply):
+    s = socket.socket(); s.bind(("127.0.0.1", 0)); s.listen()
+    def serve():
+        while True:
+            c, _ = s.accept(); c.recv(200); c.sendall(reply); c.close()
+    threading.Thread(target=serve, daemon=True).start()
+    return f"http://127.0.0.1:{s.getsockname()[1]}"
+assert srv.is_up(_fake_tcp(b"SSH-2.0-pas-du-http\r\n")) is None
+assert srv.is_up(_fake_tcp(b"")) is None or srv.is_up(_fake_tcp(b"")) is False
+assert srv.is_up(_fake_tcp(b"HTTP/1.0 401 Unauthorized\r\n\r\n")) is True
+assert srv.is_up("http://127.0.0.1:1") is False
+
 # crontab : tâches actives/désactivées, commentaires et variables conservés
 CRON = """# m h  dom mon dow   command
 SHELL=/bin/bash

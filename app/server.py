@@ -7,6 +7,7 @@ Configuration via variables d'environnement ou fichier .env à côté du script.
 import base64
 import hashlib
 import hmac
+import http.client
 import json
 import os
 import re
@@ -146,6 +147,8 @@ def run_ssh(remote, timeout=60):
         p = subprocess.run(cmd, capture_output=True, timeout=timeout)
     except subprocess.TimeoutExpired:
         return 124, f"(délai dépassé : {timeout} s)"
+    except FileNotFoundError:
+        return 127, "ssh introuvable dans le conteneur : apk add openssh-client-default (ou relance la mise à jour)"
     out = (p.stdout + p.stderr).decode(errors="replace")
     return p.returncode, out[-60000:]
 
@@ -327,8 +330,8 @@ class Handler(BaseHTTPRequestHandler):
             pass
         except Exception as e:  # noqa: BLE001
             print("Erreur :", repr(e), file=sys.stderr)
-            try:
-                self.send_json({"error": "Erreur interne"}, 500)
+            try:  # le type d'erreur aide à diagnostiquer sans aller lire le journal
+                self.send_json({"error": f"Erreur interne ({type(e).__name__} : {str(e)[:150]})"}, 500)
             except OSError:
                 pass
 
@@ -649,7 +652,8 @@ def scan_ports(guests):
             if cur:
                 text = "\n".join(buf)
                 try:  # qm guest exec renvoie du JSON
-                    text = json.loads(text).get("out-data", "")
+                    j = json.loads(text)
+                    text = j.get("out-data", "") if isinstance(j, dict) else text
                 except ValueError:
                     pass
                 found[cur] = parse_ports(text)
@@ -686,13 +690,16 @@ UP_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}),  # test
 
 
 def is_up(url):
+    """True : répond en HTTP. False : ne répond pas. None : répond, mais pas en HTTP (pas une app web)."""
     req = urllib.request.Request(url, method="GET", headers={"User-Agent": "PVEHub"})
     try:
         with UP_OPENER.open(req, timeout=3):
             return True
     except urllib.error.HTTPError:
         return True  # 401, 404… : le service répond
-    except (urllib.error.URLError, OSError, ValueError):
+    except http.client.HTTPException:
+        return None  # SSH, base de données, jeu… sur ce port
+    except Exception:  # noqa: BLE001 — un test de statut ne doit jamais faire planter la page
         return False
 
 
@@ -713,19 +720,29 @@ def r_apps(q):
             continue
         for p in web:
             url = f"{'https' if p in HTTPS_PORTS else 'http'}://{ip}{'' if p in (80, 443) else f':{p}'}{'/web' if p == 32400 else ''}"
-            label = PORT_NAMES.get(p, "")
-            name = g.get("name") or str(g["vmid"])
-            if len(web) > 1:
-                name = f"{name} · {label or p}"
-            apps.append({"id": f"{g['id']}:{p}", "name": name, "url": url, "guest": f"{g['type']}/{g['vmid']}"})
+            base = g.get("name") or str(g["vmid"])
+            apps.append({"id": f"{g['id']}:{p}", "name": f"{base} · {PORT_NAMES.get(p) or p}", "base": base,
+                         "url": url, "guest": f"{g['type']}/{g['vmid']}"})
     for link in cfg["links"]:
         apps.append({**link, "custom": True})
     for a in apps:
-        a.update({k: v for k, v in cfg["over"].get(a["id"], {}).items() if k in ("name", "url", "hidden")})
+        a.update({k: v for k, v in cfg["over"].get(a["id"], {}).items() if k in ("url", "hidden")})
     visible = [a for a in apps if not a.get("hidden")]
     with ThreadPoolExecutor(16) as ex:
         for a, up in zip(visible, ex.map(lambda a: is_up(a["url"]), visible)):
             a["up"] = up
+    # un port détecté qui ne parle pas HTTP n'est pas une app (sauf si tu as saisi son adresse toi-même)
+    apps = [a for a in apps if a.get("up") is not None or a.get("hidden") or a.get("custom") or "url" in cfg["over"].get(a["id"], {})]
+    per_guest = {}
+    for a in apps:
+        per_guest[a.get("guest")] = per_guest.get(a.get("guest"), 0) + 1
+    for a in apps:
+        if a.get("up") is None and not a.get("hidden"):
+            a["up"] = False
+        if "base" in a and per_guest[a["guest"]] == 1:
+            a["name"] = a["base"]  # une seule app sur la machine : pas besoin de préciser le port
+        a.pop("base", None)
+        a["name"] = cfg["over"].get(a["id"], {}).get("name") or a["name"]  # nom choisi par l'utilisateur
     return {"apps": apps, "scan": EXEC_ENABLED}
 
 
