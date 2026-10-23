@@ -1736,6 +1736,7 @@ $("#maint").addEventListener("click", async e => {
 // ---------- quoi de neuf : la plus récente en premier ; l'id (date + lettre) doit croître à chaque ajout
 const CHANGES = [
   { id: "2026-10-23a", title: "Hermes", items: [
+    "Quand Hermes te demande de lancer printf 'approve …' > /root/.lxc-approve, un bouton Autoriser le fait pour toi (section Commandes nécessaire).",
     "Quand Hermes te pose une question, ses réponses possibles s'affichent en boutons.",
     "Les commandes et le code ont un bouton Copier ; une commande s'ouvre d'un tap dans l'onglet Commandes, sans être lancée."] },
   { id: "2026-10-14e", title: "Apps", items: [
@@ -2132,6 +2133,17 @@ function md(m, last) {
   }
   return out;
 }
+// demandes « lxc-approve » écrites par Hermes en commande : un bouton au lieu de copier-coller dans le Shell
+const LXC_RE = /printf\s+'approve %s ([^'\\]+?)\\n'\s+"\$\(date \+%s\)"\s*>\s*\/root\/\.lxc-approve/g;
+function lxcHtml(m) {
+  return [...new Set([...m.content.matchAll(LXC_RE)].map(x => x[1].trim()))].map(g => {
+    const done = m.done?.["lxc:" + g], [verb, id, ...rest] = g.split(" "), cmd = g.split(" -- ")[1];
+    return `<div class="inline"><div class="it">${I.shield.replace("<svg", '<svg width="16" height="16" style="color:var(--orange)"')}Autoriser ${esc(verb)} dans la machine ${esc(id)}</div>
+      ${cmd ? `<div class="is">Commande : <code>${esc(cmd)}</code></div>` : ""}
+      ${done ? `<div class="done ${done === "OK" ? "" : "no"}">${done === "OK" ? "✓ Autorisé" : "✕ " + esc(done)}</div>`
+        : m.typing ? "" : S.ov?.exec ? `<div class="ibtns"><button class="ibtn pri" data-lxc="${esc(g)}">Autoriser</button></div>` : `<div class="is">Active la section Commandes pour autoriser d'ici.</div>`}</div>`;
+  }).join("");
+}
 function approvalsHtml(m) {
   return (m.approvals || []).map((ap, i) => `<div class="inline"><div class="it">${I.shield.replace("<svg", '<svg width="16" height="16" style="color:var(--orange)"')}Hermes demande l'autorisation</div>
     ${ap.description ? `<div class="is">${esc(ap.description)}</div>` : ""}${ap.command ? `<pre>${esc(ap.command)}</pre>` : ""}
@@ -2144,7 +2156,7 @@ function msgHtml(m, idx) {
   if (m.role === "user") return `<div class="msg user">${esc(m.content).replace(/\n/g, "<br>")}</div>`;
   const tools = m.tools?.length ? `<div class="tools">${m.tools.map(t => `<span>${I.wrench}${esc(t)}</span>`).join("")}</div>` : "";
   const body = m.content ? md(m, idx === S.chat.length - 1) : m.typing ? "" : "<span class='mute'>(réponse vide)</span>";
-  return `<div class="msg assistant" data-idx="${idx}">${tools}${body}${approvalsHtml(m)}${m.typing && !m.content ? '<span class="typing"><i></i><i></i><i></i></span>' : ""}</div>`;
+  return `<div class="msg assistant" data-idx="${idx}">${tools}${body}${m.content ? lxcHtml(m) : ""}${approvalsHtml(m)}${m.typing && !m.content ? '<span class="typing"><i></i><i></i><i></i></span>' : ""}</div>`;
 }
 function renderChat() {
   if (!S.ov?.hermes) { $("#chat").innerHTML = `<div class="empty">Hermes n'est pas configuré.<br>Renseigne HERMES_URL et HERMES_KEY dans /opt/pvehub/.env.</div>`; $("#composer").classList.add("hide"); return; }
@@ -2251,6 +2263,13 @@ function addNote(text) { S.pending.push("[PVE Hub] " + text); S.chat.push({ role
 $("#chat").onclick = async e => {
   if (e.target.id === "clearChat") return newConv();  // l'ancienne reste dans l'historique
   if (e.target.dataset.ex) { $("#prompt").value = e.target.dataset.ex; return send(); }
+  const lx = e.target.closest("[data-lxc]");
+  if (lx) {
+    const m = S.chat[+lx.closest("[data-idx]").dataset.idx], g = lx.dataset.lxc; lx.disabled = true;
+    try { await api("/api/lxc/approve", { body: { grant: g } }); (m.done ||= {})["lxc:" + g] = "OK"; }
+    catch (err) { toast("❌ " + err.message, 6000); lx.disabled = false; return; }
+    addNote(`Autorisation écrite sur l'hôte : ${g}`); saveChat(); renderChat(); scrollChat(); return;
+  }
   const say = e.target.closest("[data-say]");
   if (say && !S.busy) { $("#prompt").value = say.dataset.say; return send(); }
   if (e.target.closest("[data-copycode]")) return copyText(e.target.closest(".code").querySelector("pre").textContent);

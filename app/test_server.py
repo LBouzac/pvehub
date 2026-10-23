@@ -460,3 +460,14 @@ assert ssh[-1].startswith("pvesh create /cluster/backup ") and "--schedule 01:00
 srv.r_backup_job({"op": "delete", "id": "backup-1a2b"})
 assert ssh[-1].startswith("pvesh delete /cluster/backup/backup-1a2b"), ssh
 print("ok")
+
+# autorisation lxc-approve : seule une ligne « mot ID [-- commande simple] » est écrite sur l'hôte
+srv.EXEC_ENABLED, sent = True, []
+srv.run_ssh = lambda c, timeout=60: (sent.append(c), (0, ""))[1]
+srv.r_lxc_approve({"grant": "exec 110 -- bash -s"})
+assert sent[-1] == "printf 'approve %s %s\\n' \"$(date +%s)\" 'exec 110 -- bash -s' > /root/.lxc-approve", sent[-1]
+for bad in ("exec 110 -- bash; rm -rf /", "exec abc", "exec 110 -- $(id)", "exec 110\nx"):
+    try:
+        srv.r_lxc_approve({"grant": bad}); raise AssertionError(bad)
+    except srv.ApiError:
+        pass

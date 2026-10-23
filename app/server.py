@@ -727,6 +727,25 @@ def r_approval(d):
     return hermes("POST", f"/v1/runs/{run_id}/approval", body)
 
 
+# Autorisation « lxc-approve » de ton propre wrapper sur l'hôte : Hermes demande d'écrire
+#   printf 'approve %s exec 110 -- bash -s\n' "$(date +%s)" > /root/.lxc-approve
+# On n'accepte qu'une ligne « mot ID [-- commande simple] » : rien d'autre ne peut être écrit sur l'hôte.
+RE_LXC_GRANT = re.compile(r"^[a-z][a-z-]{0,20} \d{1,9}(?: -- [A-Za-z0-9_./:=@+ -]{1,200})?$")
+
+
+def r_lxc_approve(d):
+    if not EXEC_ENABLED:
+        raise ApiError(403, "Active la section Commandes pour autoriser depuis l'app")
+    grant = str(d.get("grant", "")).strip()
+    if not RE_LXC_GRANT.match(grant):
+        raise ApiError(400, "Autorisation non reconnue")
+    code, out = run_ssh(f"printf 'approve %s %s\\n' \"$(date +%s)\" {shlex.quote(grant)} > /root/.lxc-approve")
+    if code != 0:
+        raise ApiError(502, "Écriture impossible : " + out[-300:])
+    log_event("exec", "Autorisation donnée à Hermes", grant, "/#chat")
+    return {"ok": True}
+
+
 # ---------------------------------------------------------------- maintenance : sauvegardes
 def job_covers(job, vmid):
     """Une sauvegarde planifiée inclut-elle cette machine ?"""
@@ -2810,6 +2829,7 @@ ROUTES = {
     ("POST", "/api/chat"): Handler.chat,
     ("GET", "/api/chat/stream"): Handler.chat_stream,
     ("POST", "/api/chat/approval"): r_approval,
+    ("POST", "/api/lxc/approve"): r_lxc_approve,
     ("POST", "/api/exec"): r_exec,
     ("GET", "/api/maint/backups"): r_maint_backups,
     ("GET", "/api/maint/updates"): r_maint_updates,
