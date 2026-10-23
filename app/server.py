@@ -248,7 +248,14 @@ Tu peux proposer des actions que l'utilisateur exécutera d'un tap, après confi
 {{"action": "reboot", "node": "pve", "type": "lxc", "vmid": 101}}
 ```
 Actions possibles : start, shutdown (arrêt propre), stop (arrêt forcé), reboot, snapshot (champ "name" obligatoire : lettres, chiffres, - ou _, commence par une lettre ; "description" facultatif), rollback ("name" du snapshot), backup ("storage" et "mode" facultatifs : snapshot|suspend|stop).
-"type" vaut "qemu" pour une VM et "lxc" pour un conteneur. N'exécute pas toi-même ces opérations Proxmox par le terminal : propose-les avec ces blocs, l'application s'en charge. Les messages commençant par [PVE Hub] décrivent des actions déjà exécutées par l'utilisateur."""
+"type" vaut "qemu" pour une VM et "lxc" pour un conteneur. N'exécute pas toi-même ces opérations Proxmox par le terminal : propose-les avec ces blocs, l'application s'en charge. Les messages commençant par [PVE Hub] décrivent des actions déjà exécutées par l'utilisateur.
+
+Quand tu poses une question avec quelques réponses possibles, propose-les en boutons avec un bloc (une réponse par ligne, courte) :
+```choix
+Oui, redémarre-le
+Non, laisse tomber
+```
+Mets les commandes shell dans un bloc ```bash : l'utilisateur pourra les copier ou les ouvrir dans l'onglet Commandes."""
 
 
 # ---------------------------------------------------------------- Auth
@@ -654,7 +661,7 @@ def pump_run(run_id, upstream):
         if run["conv"]:
             store_reply(run["conv"], reply)
         if alone:
-            first = re.sub(r"[*_#`>]|```pvehub[\s\S]*?```", "", reply["content"]).strip().split("\n")[0][:140]
+            first = re.sub(r"```[\s\S]*?```|[*_#`>]", "", reply["content"]).strip().split("\n")[0][:140]
             send_push("💬 Hermes a répondu", first or "Réponse prête", url, f"chat-{run_id}")
 
 

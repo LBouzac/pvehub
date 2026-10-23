@@ -260,6 +260,11 @@ canvas{width:100%;height:120px;display:block}
 .msg pre{background:var(--code);padding:8px 10px;border-radius:10px;overflow-x:auto;font:12px/1.4 var(--mono);margin:6px 0}
 .msg code{font:14px var(--mono);background:var(--code);padding:1px 4px;border-radius:5px}
 .msg.user code{background:rgba(255,255,255,.2)}
+.msg .code{margin:6px 0;background:var(--code);border-radius:3px;overflow:hidden}
+.msg .code .ch{display:flex;align-items:center;gap:12px;padding:5px 10px 0;font-size:12px;color:var(--label2)}
+.msg .code .ch button{color:var(--accent);font-size:12px;font-weight:600;padding:2px 0}
+.msg .code pre{margin:0;background:none;padding:6px 10px 9px}
+.msg a{color:var(--accent)}
 .tools{display:flex;flex-wrap:wrap;gap:4px;margin:2px 0 4px}
 .tools span{font-size:12px;color:var(--label2);background:var(--card);padding:2px 8px;border-radius:9px;display:inline-flex;align-items:center;gap:4px}
 .inline{background:var(--card);border-radius:14px;padding:10px 12px;margin:8px 0 4px}
@@ -1730,6 +1735,9 @@ $("#maint").addEventListener("click", async e => {
 
 // ---------- quoi de neuf : la plus récente en premier ; l'id (date + lettre) doit croître à chaque ajout
 const CHANGES = [
+  { id: "2026-10-23a", title: "Hermes", items: [
+    "Quand Hermes te pose une question, ses réponses possibles s'affichent en boutons.",
+    "Les commandes et le code ont un bouton Copier ; une commande s'ouvre d'un tap dans l'onglet Commandes, sans être lancée."] },
   { id: "2026-10-14e", title: "Apps", items: [
     "L'onglet Apps liste toutes les apps de tes conteneurs et VM, même sans page web (base de données, MQTT…), conteneurs Docker compris.",
     "Rangées par machine, avec leur logo. Une machine arrêtée garde ses apps, grisées."] },
@@ -2096,15 +2104,26 @@ function openPerms() {
 // ---------- chat Hermes
 const CHOICE = { once: "Autoriser", session: "Pour la session", always: "Toujours", deny: "Refuser" };
 const actionBlocks = text => [...text.matchAll(/```pvehub\n?([\s\S]*?)```/g)].map(m => m[1].trim());
-function md(m) {
-  const parts = m.content.split(/```(\w*)\n?([\s\S]*?)(?:```|$)/g);
+const SHELL = ["bash", "sh", "shell", "console", "zsh", "terminal"];
+function md(m, last) {
+  const parts = m.content.split(/```([\w-]*)\n?([\s\S]*?)(?:```|$)/g);
   let out = "";
   for (let i = 0; i < parts.length; i += 3) {
-    out += esc(parts[i]).replace(/`([^`\n]+)`/g, "<code>$1</code>").replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>")
+    out += esc(i ? parts[i].replace(/^\n/, "") : parts[i]).replace(/`([^`\n]+)`/g, "<code>$1</code>").replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>")
+      .replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
       .replace(/^#{1,4} (.+)$/gm, "<b>$1</b>").replace(/^[-*] /gm, "• ").replace(/\n/g, "<br>");
     if (i + 2 >= parts.length) continue;
-    const lang = parts[i + 1], code = parts[i + 2].trim();
-    if (lang !== "pvehub") { out += `<pre>${esc(code)}</pre>`; continue; }
+    const lang = parts[i + 1].toLowerCase(), code = parts[i + 2].trim();
+    if (lang === "choix") {  // réponses proposées : des boutons, seulement sur le dernier message
+      const opts = code.split("\n").map(s => s.replace(/^(?:[-*]|\d+[.)])\s+/, "").trim()).filter(Boolean).slice(0, 6);
+      if (last && !m.typing && opts.length) out += `<div class="ibtns">${opts.map(o => `<button class="ibtn" data-say="${esc(o)}">${esc(o)}</button>`).join("")}</div>`;
+      continue;
+    }
+    if (lang !== "pvehub") {  // code : en-tête avec la langue, Copier, et pour une commande « Commandes »
+      const sh = SHELL.includes(lang), text = sh ? code.replace(/^\$ /gm, "") : code;
+      out += `<div class="code"><div class="ch"><span class="grow">${esc(lang || "code")}</span><button data-copycode>Copier</button>${sh && S.ov?.exec ? "<button data-runcode>Commandes</button>" : ""}</div><pre>${esc(text)}</pre></div>`;
+      continue;
+    }
     let a; try { a = JSON.parse(code); } catch { out += m.typing ? `<div class="inline"><div class="is">Action en préparation…</div></div>` : ""; continue; }
     const done = m.done?.[code];
     out += `<div class="inline"><div class="it">${I.bolt.replace("<svg", '<svg width="16" height="16" style="color:var(--orange)"')}${esc(describe(a))}</div>
@@ -2124,7 +2143,7 @@ function msgHtml(m, idx) {
   if (m.role === "note") return `<div class="msg note">${esc(m.content)}</div>`;
   if (m.role === "user") return `<div class="msg user">${esc(m.content).replace(/\n/g, "<br>")}</div>`;
   const tools = m.tools?.length ? `<div class="tools">${m.tools.map(t => `<span>${I.wrench}${esc(t)}</span>`).join("")}</div>` : "";
-  const body = m.content ? md(m) : m.typing ? "" : "<span class='mute'>(réponse vide)</span>";
+  const body = m.content ? md(m, idx === S.chat.length - 1) : m.typing ? "" : "<span class='mute'>(réponse vide)</span>";
   return `<div class="msg assistant" data-idx="${idx}">${tools}${body}${approvalsHtml(m)}${m.typing && !m.content ? '<span class="typing"><i></i><i></i><i></i></span>' : ""}</div>`;
 }
 function renderChat() {
@@ -2232,6 +2251,13 @@ function addNote(text) { S.pending.push("[PVE Hub] " + text); S.chat.push({ role
 $("#chat").onclick = async e => {
   if (e.target.id === "clearChat") return newConv();  // l'ancienne reste dans l'historique
   if (e.target.dataset.ex) { $("#prompt").value = e.target.dataset.ex; return send(); }
+  const say = e.target.closest("[data-say]");
+  if (say && !S.busy) { $("#prompt").value = say.dataset.say; return send(); }
+  if (e.target.closest("[data-copycode]")) return copyText(e.target.closest(".code").querySelector("pre").textContent);
+  if (e.target.closest("[data-runcode]")) {  // la commande est préremplie, rien n'est lancé sans toi
+    const cmd = e.target.closest(".code").querySelector("pre").textContent;
+    setView("exec"); showExecSection("run"); $("#cmd").value = cmd; $("#cmd").focus(); return;
+  }
   const ab = e.target.closest("[data-ap]");
   if (ab) {
     const m = S.chat[+ab.closest("[data-idx]").dataset.idx], ap = m.approvals[+ab.dataset.ap];
