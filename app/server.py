@@ -2496,7 +2496,27 @@ def is_up(url):
         return False
 
 
-APPS_SEEN_FILE = os.path.join(DATA_DIR, "apps_seen.json")  # dernières apps vues par machine : affichées si elle est arrêtée
+APPS_SEEN_FILE = os.path.join(DATA_DIR, "apps_seen.json")
+_up_cache = {}  # url -> (instant, réponse) : chaque adresse n'est testée qu'une fois toutes les 30 s
+
+
+def rescan_apps(guests):
+    try:
+        with ThreadPoolExecutor(8) as ex:
+            ips = dict(zip((g["id"] for g in guests), ex.map(guest_ip, guests)))
+        ports = scan_ports(guests)
+        _scan.update(at=time.time(), data={"ips": ips, "ports": ports})
+    finally:
+        _scan["busy"] = False
+
+
+def probe_urls(urls):
+    now = time.time()
+    todo = [u for u in set(urls) if now - _up_cache.get(u, (0, None))[0] > 30]
+    with ThreadPoolExecutor(32) as ex:
+        for u, r in zip(todo, ex.map(is_up, todo)):
+            _up_cache[u] = (time.time(), r)
+    return {u: _up_cache[u][1] for u in set(urls)}  # dernières apps vues par machine : affichées si elle est arrêtée
 
 
 def app_url(ip, p):
@@ -2512,11 +2532,11 @@ def r_apps(q):
         alive = {k: v for k, v in inst.items() if same_guest(v, by_id.get(int(k)))}
         if alive != inst:  # supprimé depuis Proxmox : on l'oublie
             write_json(INSTALLED_FILE, alive)
-    if q.get("rescan") or time.time() - _scan["at"] > 60:
-        with ThreadPoolExecutor(8) as ex:
-            ips = dict(zip((g["id"] for g in guests), ex.map(guest_ip, guests)))
-        ports = scan_ports(guests)
-        _scan.update(at=time.time(), data={"ips": ips, "ports": ports})
+    if q.get("rescan") or not _scan["at"]:
+        rescan_apps(guests)
+    elif time.time() - _scan["at"] > 60 and not _scan.get("busy"):  # résultat un peu ancien : renvoyé tout de suite, rafraîchi en fond
+        _scan["busy"] = True
+        threading.Thread(target=lambda: rescan_apps(guests), daemon=True).start()
     ips, ports = _scan["data"].get("ips", {}), _scan["data"].get("ports", {})
     cfg = load_apps_cfg()
     apps, checks = [], []
@@ -2575,18 +2595,19 @@ def r_apps(q):
         a["added"] = bool(over.get("added", a.get("added") or (a.get("store") and not a.get("off"))))
         if over.get("url"):
             a["cands"] = [over["url"]]
+    live = [a for a in apps if not a.get("off") and not a.get("hidden")]
+    up = probe_urls([u for a in live for u in (a["cands"] if a.get("cands") is not None else [a["url"]] if a.get("url") else [])])
     def probe(a):
         if a.get("off") or a.get("hidden"):
             return None
         if a.get("cands") is None:  # lien ajouté à la main, app du Store
-            return is_up(a["url"]) if a.get("url") else None
-        res = [(u, is_up(u)) for u in a["cands"]]
+            return up[a["url"]] if a.get("url") else None
+        res = [(u, up[u]) for u in a["cands"]]
         ok = next((u for u, r in res if r), None) or next((u for u, r in res if r is False), None)
         a["url"] = ok  # aucune réponse HTTP : app sans interface web
         return (ok is not None and any(r for _, r in res)) or (not res or all(r is None for _, r in res)) or False
-    with ThreadPoolExecutor(16) as ex:
-        for a, up in zip(apps, ex.map(probe, apps)):
-            a["up"] = None if a.get("off") else up
+    for a in apps:
+        a["up"] = None if a.get("off") else probe(a)
     for a in apps:
         a.pop("old", None)
         a.pop("cands", None)

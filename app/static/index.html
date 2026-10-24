@@ -598,7 +598,7 @@ function setView(v) {
   $("#setBtn").onclick = openSettings;
   $("#storeBtn") && ($("#storeBtn").onclick = openStore);
   $("#editApps") && ($("#editApps").onclick = () => { S.appsEdit = !S.appsEdit; setView("apps"); });
-  if (v === "apps" && (!S.apps || Date.now() - S.appsAt > 30000)) loadApps();
+  if (v === "apps" && (!S.appsAt || Date.now() - S.appsAt > 30000)) loadApps();
   if (v === "chat") {
     $("#permBtn") && ($("#permBtn").onclick = openPerms);
     $("#histBtn") && ($("#histBtn").onclick = openChats);
@@ -1013,9 +1013,11 @@ async function runAction(a, skipConfirm) {
 // ---------- mes apps
 const APP_COLORS = ["blue", "indigo", "purple", "pink", "red", "orange", "green", "teal"];
 const appColor = s => APP_COLORS[[...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % APP_COLORS.length];
+// dernier résultat gardé sur l'appareil : l'onglet s'affiche tout de suite, puis se met à jour
+S.apps = store.get("pvehub.apps", null); S.appsScan = !!S.apps;
 async function loadApps(rescan) {
   S.appsAt = Date.now();
-  try { const r = await api("/api/apps" + (rescan ? "?rescan=1" : "")); S.apps = r.apps; S.appsScan = r.scan; S.appsErr = null; }
+  try { const r = await api("/api/apps" + (rescan ? "?rescan=1" : "")); S.apps = r.apps; S.appsScan = r.scan; S.appsErr = null; store.set("pvehub.apps", r.apps); }
   catch (e) { S.appsErr = e.message; }
   if (S.view === "apps") renderApps();
 }
@@ -1058,7 +1060,14 @@ function renderApps() {
   $("#rescan") && ($("#rescan").onclick = () => { S.apps = null; renderApps(); loadApps(true); });
 }
 async function saveApp(body) {
-  try { await api("/api/apps/save", { body }); await loadApps(); } catch (e) { toast("❌ " + e.message); }
+  // appliqué tout de suite à l'écran ; le serveur confirme ensuite en arrière-plan
+  const a = S.apps?.find(x => x.id === body.id);
+  if (body.op === "edit" && a) for (const k of ["added", "name", "url", "icon", "hidden"]) if (k in body) a[k] = body[k] || (k === "added" ? false : a[k]);
+  if (body.op === "delete") S.apps = S.apps.filter(x => x.id !== body.id);
+  if (body.op === "add") S.apps.push({ id: "new:" + Date.now(), name: body.name, url: body.url, custom: true, added: true });
+  renderApps();
+  try { await api("/api/apps/save", { body }); } catch (e) { toast("❌ " + e.message); }
+  loadApps();
 }
 const withScheme = u => /^https?:\/\//i.test(u) ? u : "http://" + u;
 $("#v-apps").addEventListener("click", async e => {
@@ -2084,7 +2093,7 @@ $("#settings").addEventListener("click", async e => {
     if (x.current) { closeSettings(); return showLogin(); }
     toast("✅ Appareil déconnecté"); S.auth = await api("/api/auth").catch(() => S.auth); return setSec("security");
   }
-  if (e.target.closest("#logout")) { await api("/api/logout", { body: {} }).catch(() => {}); closeSettings(); return showLogin(); }
+  if (e.target.closest("#logout")) { await api("/api/logout", { body: {} }).catch(() => {}); try { localStorage.removeItem("pvehub.apps"); } catch {} closeSettings(); return showLogin(); }
   const b = e.target.closest("[data-mode],[data-accent],[data-bg]"); if (!b) return;
   const t = theme();
   if (b.dataset.mode) t.mode = b.dataset.mode === "auto" ? undefined : b.dataset.mode;

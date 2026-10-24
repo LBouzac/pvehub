@@ -224,6 +224,7 @@ assert job["vmid"] == 120 and "120" in srv.read_json(srv.INSTALLED_FILE, {})
 job["url"] = "http://192.0.2.9:8000"; srv.remember_install(job, {101})
 srv._scan.update(at=srv.time.time(), data={"ips": {"lxc/120": "192.0.2.9"}, "ports": {}})
 srv.is_up = lambda u: True
+srv._up_cache.clear()
 apps = srv.r_apps({})["apps"]
 assert [(a["name"], a["store"]) for a in apps] == [("2FAuth", 120)], apps   # aucun port vu : lien gardé de l'installation
 srv._scan["data"]["ports"] = {"lxc/120": {8000}}
