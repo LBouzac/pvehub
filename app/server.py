@@ -1446,7 +1446,7 @@ def check_apps(prev, apps):
     prev : {id: {"up_seen", "fails", "down"}} mis à jour sur place. Retourne (alertes, apps revenues)."""
     alerts, back, ids = [], [], set()
     for a in apps:
-        if a.get("hidden") or a.get("up") not in (True, False):
+        if a.get("hidden") or not a.get("added") or a.get("up") not in (True, False):  # seulement les apps de l'écran
             continue
         ids.add(a["id"])
         st = prev.setdefault(a["id"], {"up_seen": False, "fails": 0, "down": False})
@@ -2557,7 +2557,7 @@ def r_apps(q):
         if gid not in running:
             apps += [{**a, "url": None, "guest": gid, "off": True} for a in items]
     for link in cfg["links"]:
-        apps.append({**link, "custom": True})
+        apps.append({**link, "custom": True, "added": True})
     moved = False
     for a in apps:  # réglages faits avant (un id par port) : déplacés une fois pour toutes sur l'id de l'app
         for o in a.get("old", []):
@@ -2571,6 +2571,8 @@ def r_apps(q):
     for a in apps:
         over = cfg["over"].get(a["id"], {})
         a.update({k: v for k, v in over.items() if k in ("url", "hidden", "name", "icon") and v})
+        # sur l'écran Apps : celles que tu as ajoutées ; le reste est proposé en suggestion (une app du Store est ajoutée d'office)
+        a["added"] = bool(over.get("added", a.get("added") or (a.get("store") and not a.get("off"))))
         if over.get("url"):
             a["cands"] = [over["url"]]
     def probe(a):
@@ -2618,12 +2620,14 @@ def r_apps_save(d):
                 over["url"] = clean_url(d["url"])
             if "hidden" in d:
                 over["hidden"] = bool(d["hidden"])
+            if "added" in d:
+                over["added"] = bool(d["added"])
             if "icon" in d:  # nom d'un logo selfh.st, ou adresse https d'une image ; vide = logo détecté
                 ic = str(d["icon"] or "").strip()
                 if ic and not (RE_SLUG.match(ic.lower()) or (re.match(r"^https://[^\s\"'<>]+$", ic) and len(ic) <= 300)):
                     raise ApiError(400, "Logo invalide : un nom (ex. jellyfin) ou une adresse https://")
                 over["icon"] = ic.lower() if RE_SLUG.match(ic.lower()) else ic
-            cfg["over"][aid] = {k: v for k, v in over.items() if v not in ("", None, False)}
+            cfg["over"][aid] = {k: v for k, v in over.items() if v not in ("", None, False) or k == "added"}  # « retirée » doit rester
         else:
             raise ApiError(400, "Demande invalide")
         save_apps_cfg(cfg)

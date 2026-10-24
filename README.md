@@ -21,8 +21,8 @@ Petite app web pour piloter ton Proxmox depuis le téléphone, avec l'agent IA H
 - **Machines** (VM et conteneurs) : démarrer, éteindre, redémarrer, snapshots, sauvegardes et restauration ;
   changer les cœurs et la mémoire, agrandir le disque ; démarrage automatique avec le serveur
 - **Horaires** : allumer ou éteindre une ou plusieurs machines à heure fixe (« éteindre les conteneurs à 21 h »)
-- **Apps** : toutes les apps de tes conteneurs et VM (programmes et conteneurs Docker), rangées par machine, avec
-  leur logo et un point vert si elles tournent
+- **Apps** : ton écran d'apps, avec leur logo et un point vert si elles répondent. Tu ajoutes une app par son adresse,
+  ou d'un tap parmi les suggestions : les programmes et conteneurs Docker trouvés sur tes machines
 - **Store** : environ 600 apps de la communauté et les modèles officiels TurnKey, installées en un tap, désinstallées
   avec une sauvegarde et réinstallables depuis cette sauvegarde
 - **Commandes** : lancer une commande sur l'hôte, dans un conteneur ou une VM ; gérer les tâches planifiées (crontab)

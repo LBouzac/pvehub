@@ -234,6 +234,10 @@ cfg = srv.load_apps_cfg(); cfg["over"] = {"lxc/120:8000": {"hidden": True}}; srv
 assert srv.r_apps({})["apps"][0].get("hidden") is True
 srv.r_apps_save({"op": "edit", "id": apps[0]["id"], "hidden": False})
 assert not srv.r_apps({})["apps"][0].get("hidden") and "lxc/120:8000" not in srv.load_apps_cfg()["over"]
+assert srv.r_apps({})["apps"][0]["added"] is True                 # app du Store : sur l'écran d'office
+srv.r_apps_save({"op": "edit", "id": apps[0]["id"], "added": False})
+assert srv.r_apps({})["apps"][0]["added"] is False                # retirée : reste en suggestion
+srv.r_apps_save({"op": "edit", "id": apps[0]["id"], "added": True})
 srv.r_apps_save({"op": "edit", "id": apps[0]["id"], "icon": "Vaultwarden"})
 assert srv.r_apps({})["apps"][0]["icon"] == "vaultwarden"
 for bad in ("javascript:alert(1)", "http://x/a.png", "a b"):
@@ -288,7 +292,7 @@ assert srv.same_guest({}, {"name": "x"}) and not srv.same_guest({"guest": "x"}, 
 assert srv.local_time(0, {"tz": "Europe/Paris"}).hour == 1 or not srv.local_time(0, {"tz": "Europe/Paris"}).tzinfo
 # app hors ligne : seulement après 2 échecs de suite, et seulement si l'app a déjà répondu
 st = {}
-A = lambda up, i="lxc/101:8096", h=False: [{"id": i, "name": "Jellyfin", "url": "http://x:8096", "up": up, "hidden": h}]
+A = lambda up, i="lxc/101:8096", h=False: [{"id": i, "name": "Jellyfin", "url": "http://x:8096", "up": up, "hidden": h, "added": True}]
 assert srv.check_apps(st, A(True)) == ([], [])
 assert srv.check_apps(st, A(False))[0] == []                      # un raté isolé : rien
 assert len(srv.check_apps(st, A(False))[0]) == 1                  # deux ratés : alerte

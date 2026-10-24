@@ -200,8 +200,8 @@ canvas{width:100%;height:120px;display:block}
 .app{display:flex;flex-direction:column;align-items:center;gap:6px;text-decoration:none;color:var(--label);position:relative;min-width:0}
 .app .ai{width:62px;height:62px;border-radius:15px;display:grid;place-items:center;position:relative;overflow:hidden;color:#fff;font-size:26px;font-weight:600;
   box-shadow:0 1px 3px rgba(0,0,0,.12)}
-.app .ai img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;padding:11px;background:#fff;opacity:0}
-.app .ai img.ok{opacity:1}.app .ai img[src^="/icon"]{padding:0}
+.app .ai img,.lg img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;padding:11px;background:#fff;opacity:0}
+.app .ai img.ok,.lg img.ok{opacity:1}.lg{position:relative;overflow:hidden}.ico.lg img{padding:4px}.app .ai img[src^="/icon"]{padding:0}
 .app .an{font-size:12px;text-align:center;width:100%;line-height:1.2;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .app .st{position:absolute;top:-3px;right:calc(50% - 37px);width:13px;height:13px;border-radius:50%;border:2.5px solid var(--bg);background:var(--gray)}
 .app .st.up{background:var(--green)}.app .st.down{background:var(--red)}
@@ -1022,80 +1022,83 @@ async function loadApps(rescan) {
 // logo : bibliothèque selfh.st (comme le Store), sinon l'icône du site si le navigateur peut la charger, sinon l'initiale
 function appImgErr(img) { const alt = (img.dataset.alt || "").split(" ").filter(Boolean); if (alt.length) { img.dataset.alt = alt.slice(1).join(" "); img.src = alt[0]; } else img.remove(); }
 const logoSrc = s => s === "pvehub" || s === "pvehub-light" ? "/icon.png?v=3" : s === "pvehub-dark" ? "/icon-dark.png?v=3" : /^https:/.test(s) ? s : CS_ICON(s);  // PVE Hub : son propre logo (clair par défaut)
-function appTile(a) {
+function logoHtml(a) {  // initiale, recouverte par le logo une fois chargé
   let origin = ""; try { origin = new URL(a.url).origin; } catch {}
   const fav = origin && (location.protocol === "http:" || origin.startsWith("https:")) ? origin + "/favicon.ico" : "";
   const all = [...new Set([a.icon && logoSrc(a.icon), a.icon2 && a.icon2 !== a.icon && CS_ICON(a.icon2), fav].filter(Boolean))];
-  const src = all[0] || "", alt = all.slice(1).join(" ");
   const letter = esc([...a.name.trim()][0]?.toUpperCase() || "?");
+  return `${letter}${all[0] ? `<img src="${esc(all[0])}" ${all.length > 1 ? `data-alt="${esc(all.slice(1).join(" "))}"` : ""} alt="" loading="lazy" onload="this.classList.add('ok')" onerror="appImgErr(this)">` : ""}`;
+}
+function appTile(a) {
   const tag = S.appsEdit ? "button" : a.url && !a.off ? `a href="${esc(a.url)}" target="_blank" rel="noopener"` : `button data-gid="${esc(a.guest || "")}"`;
-  return `<${tag} class="app ${a.hidden || a.off ? "hid" : ""}" data-app="${esc(a.id)}" title="${esc(a.url || (a.off ? "Machine arrêtée" : "Sans interface web"))}">
-    <span class="ai" style="background:var(--${appColor(a.name)})">${letter}${src ? `<img src="${esc(src)}" ${alt ? `data-alt="${esc(alt)}"` : ""} alt="" loading="lazy" onload="this.classList.add('ok')" onerror="appImgErr(this)">` : ""}</span>
-    ${a.hidden ? "" : `<span class="st ${a.up === true ? "up" : a.up === false ? "down" : ""}"></span>`}
+  return `<${tag} class="app ${a.off ? "hid" : ""}" data-app="${esc(a.id)}" title="${esc(a.url || (a.off ? "Machine arrêtée" : "Sans interface web"))}">
+    <span class="ai" style="background:var(--${appColor(a.name)})">${logoHtml(a)}</span>
+    <span class="st ${a.up === true ? "up" : a.up === false ? "down" : ""}"></span>
     <span class="an">${esc(a.name)}</span></${tag.split(" ")[0]}>`;
 }
-// une section par machine (allumées d'abord), puis les liens ajoutés à la main
-function appGroups(list) {
-  const g = new Map();
-  for (const a of list) { const k = a.custom ? "links" : a.guest || "links"; if (!g.has(k)) g.set(k, []); g.get(k).push(a); }
-  const label = k => {
-    if (k === "links") return "Mes liens";
-    const m = S.ov?.guests.find(x => x.id === k);
-    return m ? `${esc(m.name || m.vmid)} <span style="text-transform:none">· ${kind(m.type)} ${m.vmid}${m.status === "running" ? "" : " · arrêtée"}</span>` : esc(k);
-  };
-  const rank = k => k === "links" ? 2 : S.ov?.guests.find(x => x.id === k)?.status === "running" ? 0 : 1;
-  return [...g.entries()].sort((a, b) => rank(a[0]) - rank(b[0]) || (parseInt(a[0].split("/")[1]) || 0) - (parseInt(b[0].split("/")[1]) || 0))
-    .map(([k, items]) => ({ label: label(k), items }));
-}
+const gLabel = gid => { const m = S.ov?.guests.find(x => x.id === gid); return m ? `${m.name || m.vmid} · ${kind(m.type)} ${m.vmid}` : ""; };
+// écran : les apps que tu as ajoutées ; en dessous, ce qui a été détecté sur tes machines, à ajouter d'un tap
 function renderApps() {
   const el = $("#v-apps");
-  if (!S.apps) { el.innerHTML = `<h1 class="large">Apps</h1><div class="empty">${S.appsErr ? esc(S.appsErr) : "Recherche des apps sur tes machines…"}</div>`; return; }
-  const list = S.appsEdit ? S.apps : S.apps.filter(a => !a.hidden);
-  const groups = appGroups(list);
-  const add = S.appsEdit ? `<div class="hdr">Ajouter</div><div class="appgrid edit"><button class="app add" data-add><span class="ai">+</span><span class="an">Ajouter un lien</span></button></div>` : "";
+  if (!S.apps) { el.innerHTML = `<h1 class="large">Apps</h1><div class="empty">${S.appsErr ? esc(S.appsErr) : "Chargement…"}</div>`; return; }
+  const mine = S.apps.filter(a => a.added), sugg = S.apps.filter(a => !a.added && !a.custom);
   el.innerHTML = `<h1 class="large">Apps</h1>
-    ${list.length ? groups.map(gr => `<div class="hdr"><span class="grow ell">${gr.label}</span></div><div class="appgrid ${S.appsEdit ? "edit" : ""}">${gr.items.map(appTile).join("")}</div>`).join("") + add
-      : S.appsEdit ? add : `<div class="empty">Aucune app trouvée.<br>Touche « Modifier » pour ajouter un lien.</div>`}
-    <div class="ftr" style="margin-top:24px">${S.appsEdit ? "Touche une app pour la renommer, changer son adresse ou la masquer. Les apps installées par le Store peuvent aussi être désinstallées."
-      : S.appsScan ? "Programmes et conteneurs Docker détectés sur tes machines. Point vert : l'app tourne ; une app sans page web ouvre sa machine. Grisées : machine arrêtée."
-      : "Active la section Commandes pour détecter les apps automatiquement. Tu peux aussi ajouter des liens à la main."}</div>
-    ${S.appsEdit ? "" : `<div class="group" style="margin-top:16px"><button class="cell tap act" id="rescan"><div class="body">Rechercher de nouvelles apps</div></button></div>`}`;
+    <div class="appgrid ${S.appsEdit ? "edit" : ""}">${mine.map(appTile).join("")}
+      <button class="app add" data-add><span class="ai">+</span><span class="an">Ajouter</span></button></div>
+    ${mine.length ? "" : `<div class="ftr" style="margin-top:14px">Touche + et colle l'adresse d'une app, ou choisis-la dans les suggestions.</div>`}
+    ${S.appsEdit && mine.length ? `<div class="ftr" style="margin-top:14px">Touche une app pour la renommer, changer son adresse ou son logo, ou la retirer de l'écran.</div>` : ""}
+    <div class="hdr"><span class="grow">Suggestions</span></div><div class="group">
+      ${sugg.map(a => `<div class="cell icon"><span class="ico lg" style="background:var(--${appColor(a.name)});font-weight:600">${logoHtml(a)}</span>
+        <div class="body"><div class="t ell">${esc(a.name)}</div><div class="s ell">${esc(gLabel(a.guest))}${a.off ? " · arrêtée" : a.url ? " · " + esc(a.url.replace(/^https?:\/\//, "")) : " · sans page web"}</div></div>
+        <button class="navbtn" data-sug="${esc(a.id)}" style="font-weight:600">Ajouter</button></div>`).join("")
+      || `<div class="cell"><div class="body mute">${S.appsScan ? "Rien de plus trouvé sur tes machines." : "Active la section Commandes pour détecter les apps de tes machines."}</div></div>`}
+      ${S.appsScan ? `<button class="cell tap act" id="rescan"><div class="body">Rechercher à nouveau</div></button>` : ""}</div>
+    <div class="ftr">Programmes et conteneurs Docker trouvés sur tes machines allumées.</div>
+    <div style="height:24px"></div>`;
   $("#rescan") && ($("#rescan").onclick = () => { S.apps = null; renderApps(); loadApps(true); });
 }
 async function saveApp(body) {
   try { await api("/api/apps/save", { body }); await loadApps(); } catch (e) { toast("❌ " + e.message); }
 }
+const withScheme = u => /^https?:\/\//i.test(u) ? u : "http://" + u;
 $("#v-apps").addEventListener("click", async e => {
+  const sug = e.target.closest("[data-sug]");
+  if (sug) return saveApp({ op: "edit", id: sug.dataset.sug, added: true });
+  if (e.target.closest("[data-add]")) {
+    const v = await alertForm("Ajouter une app", "Son adresse, par exemple 192.168.1.20:8096. Le nom est facultatif.",
+      [{ name: "url", ph: "http://192.168.1.20:8096" }, { name: "name", ph: "Nom (facultatif)" }]);
+    if (!v?.url?.trim()) return;
+    const url = withScheme(v.url.trim()); let origin; try { origin = new URL(url).origin; } catch { return toast("Adresse invalide"); }
+    // une app déjà détectée à cette adresse : on la garde (logo, état, machine)
+    const hit = S.apps.find(a => !a.custom && a.url && (() => { try { return new URL(a.url).origin === origin; } catch { return false; } })());
+    if (hit) return saveApp({ op: "edit", id: hit.id, added: true, ...(v.name?.trim() ? { name: v.name.trim() } : {}), ...(url !== hit.url ? { url } : {}) });
+    return saveApp({ op: "add", name: v.name?.trim() || new URL(url).hostname, url });
+  }
   const gb = !S.appsEdit && e.target.closest("[data-gid]");
   if (gb) { if (findGuest(gb.dataset.gid)) openGuest(gb.dataset.gid); return; }
   if (!S.appsEdit) return;
-  if (e.target.closest("[data-add]")) {
-    const v = await alertForm("Ajouter un lien", "Une app hors de Proxmox, ta box…", [{ name: "name", ph: "Nom" }, { name: "url", ph: "http://192.168.1.1" }]);
-    if (v) saveApp({ op: "add", ...v });
-    return;
-  }
   const t = e.target.closest("[data-app]"); if (!t) return;
   const a = S.apps.find(x => x.id === t.dataset.app); if (!a) return;
-  const btns = [{ label: "Renommer" }, { label: "Changer l'adresse" }, { label: a.hidden ? "Afficher" : "Masquer" }, { label: "Changer le logo" }];
-  if (a.custom) btns.push({ label: "Supprimer le lien", danger: true });
-  if (a.store) btns.push({ label: "Désinstaller l'app…", danger: true });
-  const i = await actionSheet(esc(a.name), esc(a.url || "Sans interface web"), btns);
-  if (a.store && i === btns.length - 1) return uninstallApp(a);
-  if (i === 0) { const v = await alertForm("Renommer", "Laisse vide pour revenir au nom d'origine.", [{ name: "name", ph: "Nom", value: a.name }]); if (v) saveApp({ op: "edit", id: a.id, name: v.name }); }
-  if (i === 1) { const v = await alertForm("Adresse", "", [{ name: "url", ph: "http://…", value: a.url || "" }]); if (v) saveApp({ op: "edit", id: a.id, url: v.url }); }
-  if (i === 2) saveApp({ op: "edit", id: a.id, hidden: !a.hidden });
-  if (i === 3 && /^pvehub/.test(a.icon || "")) {  // PVE Hub : son logo sombre ou clair
+  const acts = [
+    ["Renommer", async () => { const v = await alertForm("Renommer", "Laisse vide pour revenir au nom d'origine.", [{ name: "name", ph: "Nom", value: a.name }]); if (v) saveApp({ op: "edit", id: a.id, name: v.name }); }],
+    ["Changer l'adresse", async () => { const v = await alertForm("Adresse", "", [{ name: "url", ph: "http://…", value: a.url || "" }]); if (v) saveApp({ op: "edit", id: a.id, url: withScheme(v.url.trim()) }); }],
+    ["Changer le logo", () => changeLogo(a)],
+    a.custom ? ["Supprimer", () => saveApp({ op: "delete", id: a.id }), true] : ["Retirer de l'écran", () => saveApp({ op: "edit", id: a.id, added: false })],
+    ...(a.store ? [["Désinstaller l'app…", () => uninstallApp(a), true]] : []),
+  ];
+  const i = await actionSheet(esc(a.name), esc(a.url || "Sans interface web"), acts.map(([label, , danger]) => ({ label, danger })));
+  if (i >= 0) acts[i][1]();
+});
+async function changeLogo(a) {
+  if (/^pvehub/.test(a.icon || "")) {  // PVE Hub : son logo clair ou sombre
     const j = await actionSheet("Logo de PVE Hub", "", [{ label: "Clair" }, { label: "Sombre" }, { label: "Autre logo…" }]);
     if (j === 0 || j === 1) return saveApp({ op: "edit", id: a.id, icon: j ? "pvehub-dark" : "pvehub" });
     if (j !== 2) return;
   }
-  if (i === 3) {
-    const v = await alertForm("Logo", `Le nom d'un logo de <a href="https://selfh.st/icons/" target="_blank" rel="noopener">selfh.st/icons</a> (ex. vaultwarden), ou l'adresse https d'une image. Laisse vide pour revenir au logo détecté.`,
-      [{ name: "icon", ph: "jellyfin", value: a.icon || "" }]);
-    if (v) saveApp({ op: "edit", id: a.id, icon: v.icon });
-  }
-  if (a.custom && i === 4) saveApp({ op: "delete", id: a.id });
-});
+  const v = await alertForm("Logo", `Le nom d'un logo de <a href="https://selfh.st/icons/" target="_blank" rel="noopener">selfh.st/icons</a> (ex. vaultwarden), ou l'adresse https d'une image. Laisse vide pour revenir au logo détecté.`,
+    [{ name: "icon", ph: "jellyfin", value: a.icon || "" }]);
+  if (v) saveApp({ op: "edit", id: a.id, icon: v.icon });
+}
 
 async function uninstallApp(a) {
   const i = await actionSheet(`Désinstaller ${esc(a.name)} ?`, `Le conteneur ${a.store} et ses disques seront supprimés.`,
@@ -1735,6 +1738,10 @@ $("#maint").addEventListener("click", async e => {
 
 // ---------- quoi de neuf : la plus récente en premier ; l'id (date + lettre) doit croître à chaque ajout
 const CHANGES = [
+  { id: "2026-10-24a", title: "Apps", items: [
+    "L'écran Apps ne montre plus que les apps que tu ajoutes : touche + et colle leur adresse.",
+    "Ce qui est trouvé sur tes machines s'affiche en suggestions, à ajouter d'un tap. Les apps installées par le Store sont ajoutées d'office.",
+    "Les alertes « app hors ligne » ne concernent plus que les apps de ton écran."] },
   { id: "2026-10-23a", title: "Hermes", items: [
     "Quand Hermes te demande de lancer printf 'approve …' > /root/.lxc-approve, un bouton Autoriser le fait pour toi (section Commandes nécessaire).",
     "Quand Hermes te pose une question, ses réponses possibles s'affichent en boutons.",
