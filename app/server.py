@@ -2523,7 +2523,46 @@ def app_url(ip, p):
     return f"{'https' if p in HTTPS_PORTS else 'http'}://{ip}{'' if p in (80, 443) else f':{p}'}{'/web' if p == 32400 else ''}"
 
 
+def finish_apps(apps, cfg):
+    """Réglages de l'utilisateur, « ajoutée à l'écran », adresse qui répond et état de chaque app."""
+    for a in apps:
+        over = cfg["over"].get(a["id"], {})
+        a.update({k: v for k, v in over.items() if k in ("url", "hidden", "name", "icon") and v})
+        # sur l'écran Apps : celles que tu as ajoutées ; le reste est proposé en suggestion (une app du Store est ajoutée d'office)
+        a["added"] = bool(over.get("added", a.get("added") or (a.get("store") and not a.get("off"))))
+        if over.get("url"):
+            a["cands"] = [over["url"]]
+    live = [a for a in apps if not a.get("off") and not a.get("hidden")]
+    up = probe_urls([u for a in live for u in (a["cands"] if a.get("cands") is not None else [a["url"]] if a.get("url") else [])])
+    def probe(a):
+        if a.get("off") or a.get("hidden"):
+            return None
+        if a.get("cands") is None:  # lien ajouté à la main, app du Store, app mémorisée
+            return up[a["url"]] if a.get("url") else True
+        res = [(u, up[u]) for u in a["cands"]]
+        ok = next((u for u, r in res if r), None) or next((u for u, r in res if r is False), None)
+        a["url"] = ok  # aucune réponse HTTP : app sans interface web
+        return (ok is not None and any(r for _, r in res)) or (not res or all(r is None for _, r in res)) or False
+    for a in apps:
+        a["up"] = None if a.get("off") else probe(a)
+        a.pop("old", None)
+        a.pop("cands", None)
+
+
+def r_apps_mine():
+    """Rapide : les apps de ton écran depuis ce qui a été mémorisé, sans fouiller les machines. Seules leurs adresses sont testées."""
+    running = {g["id"] for g in all_guests() if g.get("status") == "running"}
+    cfg, last = load_apps_cfg(), read_json(APPS_SEEN_FILE, {})
+    apps = [{**a, "guest": gid, **({} if gid in running else {"url": None, "off": True})} for gid, items in last.items() for a in items]
+    apps += [{**link, "custom": True, "added": True} for link in cfg["links"]]
+    apps = [a for a in apps if cfg["over"].get(a["id"], {}).get("added", a.get("custom") or (a.get("store") and not a.get("off")))]
+    finish_apps(apps, cfg)
+    return {"apps": apps, "scan": EXEC_ENABLED, "partial": True}
+
+
 def r_apps(q):
+    if q.get("mine"):
+        return r_apps_mine()
     every = all_guests()
     guests = [g for g in every if g.get("status") == "running"]
     with _installed_lock:
@@ -2565,16 +2604,10 @@ def r_apps(q):
             apps.append({"id": f"store:{g['vmid']}", "name": st["name"], "url": st["url"], "icon": app_key(st["name"]).replace(" ", "-"),
                          "guest": f"{g['type']}/{g['vmid']}", "store": g["vmid"]})
     # machines arrêtées : leurs apps vues la dernière fois, grisées
-    with _apps_lock:
-        last = read_json(APPS_SEEN_FILE, {})
-        running = {f"{g['type']}/{g['vmid']}" for g in guests}
-        for gid in {a["guest"] for a in apps}:
-            last[gid] = [{k: a[k] for k in ("id", "name", "icon", "store")} for a in apps if a["guest"] == gid]
-        known = {f"{g['type']}/{g['vmid']}" for g in every}
-        last = {k: v for k, v in last.items() if k in known}  # machine supprimée : oubliée
-        write_json(APPS_SEEN_FILE, last)
+    last = read_json(APPS_SEEN_FILE, {})
+    running = {f"{g['type']}/{g['vmid']}" for g in guests}
     for gid, items in last.items():
-        if gid not in running:
+        if gid not in running and gid not in {a["guest"] for a in apps}:
             apps += [{**a, "url": None, "guest": gid, "off": True} for a in items]
     for link in cfg["links"]:
         apps.append({**link, "custom": True, "added": True})
@@ -2588,29 +2621,16 @@ def r_apps(q):
     if moved:
         with _apps_lock:
             save_apps_cfg(cfg)
-    for a in apps:
-        over = cfg["over"].get(a["id"], {})
-        a.update({k: v for k, v in over.items() if k in ("url", "hidden", "name", "icon") and v})
-        # sur l'écran Apps : celles que tu as ajoutées ; le reste est proposé en suggestion (une app du Store est ajoutée d'office)
-        a["added"] = bool(over.get("added", a.get("added") or (a.get("store") and not a.get("off"))))
-        if over.get("url"):
-            a["cands"] = [over["url"]]
-    live = [a for a in apps if not a.get("off") and not a.get("hidden")]
-    up = probe_urls([u for a in live for u in (a["cands"] if a.get("cands") is not None else [a["url"]] if a.get("url") else [])])
-    def probe(a):
-        if a.get("off") or a.get("hidden"):
-            return None
-        if a.get("cands") is None:  # lien ajouté à la main, app du Store
-            return up[a["url"]] if a.get("url") else None
-        res = [(u, up[u]) for u in a["cands"]]
-        ok = next((u for u, r in res if r), None) or next((u for u, r in res if r is False), None)
-        a["url"] = ok  # aucune réponse HTTP : app sans interface web
-        return (ok is not None and any(r for _, r in res)) or (not res or all(r is None for _, r in res)) or False
-    for a in apps:
-        a["up"] = None if a.get("off") else probe(a)
-    for a in apps:
-        a.pop("old", None)
-        a.pop("cands", None)
+    raw = {a["id"]: (a["name"], a.get("icon")) for a in apps}
+    finish_apps(apps, cfg)
+    # mémorisées par machine : pour les machines arrêtées et pour afficher tout de suite les apps de l'écran (?mine=1)
+    with _apps_lock:
+        for gid in running | {a["guest"] for a in apps if not a.get("off") and not a.get("custom")}:
+            if gid in running:
+                last[gid] = [{"id": a["id"], "name": raw[a["id"]][0], "icon": raw[a["id"]][1], "icon2": a.get("icon2"), "store": a.get("store"),
+                              "url": a["url"]} for a in apps if a.get("guest") == gid and not a.get("custom")]
+        known = {f"{g['type']}/{g['vmid']}" for g in every}
+        write_json(APPS_SEEN_FILE, {k: v for k, v in last.items() if k in known})  # machine supprimée : oubliée
     return {"apps": apps, "scan": EXEC_ENABLED}
 
 

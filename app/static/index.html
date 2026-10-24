@@ -1017,8 +1017,17 @@ const appColor = s => APP_COLORS[[...s].reduce((h, c) => (h * 31 + c.charCodeAt(
 S.apps = store.get("pvehub.apps", null); S.appsScan = !!S.apps;
 async function loadApps(rescan) {
   S.appsAt = Date.now();
-  try { const r = await api("/api/apps" + (rescan ? "?rescan=1" : "")); S.apps = r.apps; S.appsScan = r.scan; S.appsErr = null; store.set("pvehub.apps", r.apps); }
-  catch (e) { S.appsErr = e.message; }
+  const ask = S.appsAsk = {};  // un rechargement plus récent l'emporte
+  if (!rescan && !S.apps?.length) try {  // d'abord tes apps (rapide), puis les suggestions (fouille des machines)
+    const r = await api("/api/apps?mine=1");
+    if (S.appsAsk === ask && !S.appsFull) { S.apps = r.apps; S.appsScan = r.scan; S.appsErr = null; if (S.view === "apps") renderApps(); }
+  } catch {}
+  S.appsFull = false;
+  try {
+    const r = await api("/api/apps" + (rescan ? "?rescan=1" : ""));
+    if (S.appsAsk !== ask) return;
+    S.apps = r.apps; S.appsScan = r.scan; S.appsErr = null; S.appsFull = true; store.set("pvehub.apps", r.apps);
+  } catch (e) { S.appsErr = e.message; }
   if (S.view === "apps") renderApps();
 }
 // logo : bibliothèque selfh.st (comme le Store), sinon l'icône du site si le navigateur peut la charger, sinon l'initiale
@@ -1043,6 +1052,7 @@ const gLabel = gid => { const m = S.ov?.guests.find(x => x.id === gid); return m
 function renderApps() {
   const el = $("#v-apps");
   if (!S.apps) { el.innerHTML = `<h1 class="large">Apps</h1><div class="empty">${S.appsErr ? esc(S.appsErr) : "Chargement…"}</div>`; return; }
+  const searching = !S.appsFull && !S.appsErr;
   const mine = S.apps.filter(a => a.added), sugg = S.apps.filter(a => !a.added && !a.custom);
   el.innerHTML = `<h1 class="large">Apps</h1>
     <div class="appgrid ${S.appsEdit ? "edit" : ""}">${mine.map(appTile).join("")}
@@ -1053,11 +1063,11 @@ function renderApps() {
       ${sugg.map(a => `<div class="cell icon"><span class="ico lg" style="background:var(--${appColor(a.name)});font-weight:600">${logoHtml(a)}</span>
         <div class="body"><div class="t ell">${esc(a.name)}</div><div class="s ell">${esc(gLabel(a.guest))}${a.off ? " · arrêtée" : a.url ? " · " + esc(a.url.replace(/^https?:\/\//, "")) : " · sans page web"}</div></div>
         <button class="navbtn" data-sug="${esc(a.id)}" style="font-weight:600">Ajouter</button></div>`).join("")
-      || `<div class="cell"><div class="body mute">${S.appsScan ? "Rien de plus trouvé sur tes machines." : "Active la section Commandes pour détecter les apps de tes machines."}</div></div>`}
-      ${S.appsScan ? `<button class="cell tap act" id="rescan"><div class="body">Rechercher à nouveau</div></button>` : ""}</div>
+      || `<div class="cell"><div class="body mute">${searching ? "Recherche sur tes machines…" : S.appsScan ? "Rien de plus trouvé sur tes machines." : "Active la section Commandes pour détecter les apps de tes machines."}</div></div>`}
+      ${S.appsScan && !searching ? `<button class="cell tap act" id="rescan"><div class="body">Rechercher à nouveau</div></button>` : ""}</div>
     <div class="ftr">Programmes et conteneurs Docker trouvés sur tes machines allumées.</div>
     <div style="height:24px"></div>`;
-  $("#rescan") && ($("#rescan").onclick = () => { S.apps = null; renderApps(); loadApps(true); });
+  $("#rescan") && ($("#rescan").onclick = () => { S.appsFull = false; renderApps(); loadApps(true); });
 }
 async function saveApp(body) {
   // appliqué tout de suite à l'écran ; le serveur confirme ensuite en arrière-plan

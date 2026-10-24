@@ -239,6 +239,8 @@ assert srv.r_apps({})["apps"][0]["added"] is True                 # app du Store
 srv.r_apps_save({"op": "edit", "id": apps[0]["id"], "added": False})
 assert srv.r_apps({})["apps"][0]["added"] is False                # retirée : reste en suggestion
 srv.r_apps_save({"op": "edit", "id": apps[0]["id"], "added": True})
+mine = srv.r_apps({"mine": 1})["apps"]                            # rapide : depuis la mémoire, sans fouiller les machines
+assert [(m["name"], m["url"], m["added"]) for m in mine] == [("2FAuth", "http://192.0.2.9:8000", True)], mine
 srv.r_apps_save({"op": "edit", "id": apps[0]["id"], "icon": "Vaultwarden"})
 assert srv.r_apps({})["apps"][0]["icon"] == "vaultwarden"
 for bad in ("javascript:alert(1)", "http://x/a.png", "a b"):
