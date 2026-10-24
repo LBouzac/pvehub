@@ -1757,6 +1757,8 @@ $("#maint").addEventListener("click", async e => {
 
 // ---------- quoi de neuf : la plus récente en premier ; l'id (date + lettre) doit croître à chaque ajout
 const CHANGES = [
+  { id: "2026-10-24b", title: "Hermes", items: [
+    "Autorisations « lxc-approve » : en plus d'Autoriser, tu peux choisir Pendant 1 h ou Toute la conversation. La même demande est alors autorisée toute seule, et Hermes continue sans attendre."] },
   { id: "2026-10-24a", title: "Apps", items: [
     "L'écran Apps ne montre plus que les apps que tu ajoutes : touche + et colle leur adresse.",
     "Ce qui est trouvé sur tes machines s'affiche en suggestions, à ajouter d'un tap. Les apps installées par le Store sont ajoutées d'office.",
@@ -2166,9 +2168,25 @@ function lxcHtml(m) {
     const done = m.done?.["lxc:" + g], [verb, id, ...rest] = g.split(" "), cmd = g.split(" -- ")[1];
     return `<div class="inline"><div class="it">${I.shield.replace("<svg", '<svg width="16" height="16" style="color:var(--orange)"')}Autoriser ${esc(verb)} dans la machine ${esc(id)}</div>
       ${cmd ? `<div class="is">Commande : <code>${esc(cmd)}</code></div>` : ""}
-      ${done ? `<div class="done ${done === "OK" ? "" : "no"}">${done === "OK" ? "✓ Autorisé" : "✕ " + esc(done)}</div>`
-        : m.typing ? "" : S.ov?.exec ? `<div class="ibtns"><button class="ibtn pri" data-lxc="${esc(g)}">Autoriser</button></div>` : `<div class="is">Active la section Commandes pour autoriser d'ici.</div>`}</div>`;
+      ${done ? `<div class="done ${done === "OK" || done === "AUTO" ? "" : "no"}">${done === "OK" ? "✓ Autorisé" : done === "AUTO" ? "✓ Autorisé automatiquement" : "✕ " + esc(done)}</div>`
+        : m.typing ? "" : S.ov?.exec ? `<div class="ibtns"><button class="ibtn pri" data-lxc="${esc(g)}">Autoriser</button><button class="ibtn" data-lxc="${esc(g)}" data-for="hour">Pendant 1 h</button><button class="ibtn" data-lxc="${esc(g)}" data-for="conv">Toute la conversation</button></div>` : `<div class="is">Active la section Commandes pour autoriser d'ici.</div>`}</div>`;
   }).join("");
+}
+// « Pendant 1 h » / « Toute la conversation » : la même demande est ensuite autorisée toute seule (sur cet appareil)
+const lxcGrants = () => store.get("pvehub.lxcGrants", []).filter(x => x.until > Date.now());
+const lxcAllowed = g => lxcGrants().some(x => x.g === g && (!x.conv || x.conv === S.conv.id));
+async function approveLxc(m, g, auto) {
+  await api("/api/lxc/approve", { body: { grant: g } });
+  (m.done ||= {})["lxc:" + g] = auto ? "AUTO" : "OK";
+  addNote(`Autorisation écrite sur l'hôte${auto ? " (automatiquement)" : ""} : ${g}`);
+}
+async function autoLxc(m) {
+  if (!S.ov?.exec || !m || m.typing || m.role !== "assistant" || m !== S.chat[S.chat.length - 1] || !m.content) return;
+  const todo = [...new Set([...m.content.matchAll(LXC_RE)].map(x => x[1].trim()))].filter(g => !m.done?.["lxc:" + g] && lxcAllowed(g));
+  if (!todo.length) return;
+  try { for (const g of todo) await approveLxc(m, g, true); } catch (err) { return toast("❌ " + err.message, 6000); }
+  saveChat(); renderChat(); scrollChat();
+  if (!S.busy) { $("#prompt").value = "C'est autorisé, tu peux continuer."; send(); }  // Hermes attend la suite
 }
 function approvalsHtml(m) {
   return (m.approvals || []).map((ap, i) => `<div class="inline"><div class="it">${I.shield.replace("<svg", '<svg width="16" height="16" style="color:var(--orange)"')}Hermes demande l'autorisation</div>
@@ -2223,7 +2241,7 @@ async function initChats() {
   if (id && S.chats.some(c => c.id === id)) await openConv(id, true);
 }
 async function openConv(id, quiet) {
-  try { const c = await api("/api/chats/get?" + qs({ id })); setConv(c); if (!quiet) setView("chat"); resumeRuns(); }
+  try { const c = await api("/api/chats/get?" + qs({ id })); setConv(c); if (!quiet) setView("chat"); resumeRuns(); autoLxc(S.chat[S.chat.length - 1]); }
   catch (e) { if (!quiet) toast("❌ " + e.message); }
 }
 // Ouvre une nouvelle conversation avec la question prête (modifiable) ; le contexte part avec, sans encombrer le chat
@@ -2291,10 +2309,12 @@ $("#chat").onclick = async e => {
   if (e.target.dataset.ex) { $("#prompt").value = e.target.dataset.ex; return send(); }
   const lx = e.target.closest("[data-lxc]");
   if (lx) {
-    const m = S.chat[+lx.closest("[data-idx]").dataset.idx], g = lx.dataset.lxc; lx.disabled = true;
-    try { await api("/api/lxc/approve", { body: { grant: g } }); (m.done ||= {})["lxc:" + g] = "OK"; }
-    catch (err) { toast("❌ " + err.message, 6000); lx.disabled = false; return; }
-    addNote(`Autorisation écrite sur l'hôte : ${g}`); saveChat(); renderChat(); scrollChat(); return;
+    const m = S.chat[+lx.closest("[data-idx]").dataset.idx], g = lx.dataset.lxc, f = lx.dataset.for; lx.disabled = true;
+    try { await approveLxc(m, g); } catch (err) { toast("❌ " + err.message, 6000); lx.disabled = false; return; }
+    if (f) store.set("pvehub.lxcGrants", [...lxcGrants().filter(x => x.g !== g),
+      f === "hour" ? { g, until: Date.now() + 3600e3 } : { g, conv: S.conv.id, until: Date.now() + 86400e3 }]);
+    if (f) toast(f === "hour" ? "Autorisé pendant 1 h" : "Autorisé pour cette conversation");
+    saveChat(); renderChat(); scrollChat(); return;
   }
   const say = e.target.closest("[data-say]");
   if (say && !S.busy) { $("#prompt").value = say.dataset.say; return send(); }
@@ -2410,7 +2430,7 @@ async function followRun(reply, conv) {
   if (!ended) return;  // app passée en arrière-plan : le serveur continue, on se raccrochera au retour
   reply.typing = false; paint(true); saveChat(conv);
   if (conv === S.conv) { S.busy = false; $("#sendBtn").disabled = false; }
-  autoRun(reply);
+  autoRun(reply); if (conv === S.conv) autoLxc(reply);
 }
 // réponses encore en cours dans la conversation affichée (après réouverture de l'app ou d'une conversation)
 function resumeRuns() { for (const m of S.chat) if (m.role === "assistant" && m.typing && m.runId) followRun(m, S.conv); }
