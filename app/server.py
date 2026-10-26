@@ -1330,20 +1330,32 @@ def qb_torrents(s):
     base = s["qb_url"].rstrip("/")
     op = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()),
                                      urllib.request.HTTPSHandler(context=NO_VERIFY))
-    hdr = {"Referer": base, "User-Agent": "PVEHub"}  # qBittorrent refuse les requêtes sans Referer de son adresse
+    hdr = {"Referer": base, "Origin": base, "User-Agent": "PVEHub"}  # qBittorrent refuse les requêtes sans Referer de son adresse
     try:
         if s.get("qb_user"):
             body = urllib.parse.urlencode({"username": s["qb_user"], "password": s.get("qb_pass", "")}).encode()
             with op.open(urllib.request.Request(base + "/api/v2/auth/login", data=body, headers=hdr), timeout=8) as r:
-                if r.read().decode().strip() != "Ok.":
-                    raise ApiError(400, "qBittorrent : identifiant ou mot de passe refusé")  # pas 401 : l'app croirait sa session expirée
+                txt = r.read().decode(errors="replace").strip()
+            # « Ok. » (v4) ou réponse vide 204 (v5) ; « Fails. » = mauvais identifiants
+            if txt.startswith("Fails"):
+                raise ApiError(400, "qBittorrent : identifiant ou mot de passe refusé")  # pas 401 : l'app croirait sa session expirée
         with op.open(urllib.request.Request(base + "/api/v2/torrents/info", headers=hdr), timeout=8) as r:
-            return json.loads(r.read())
+            raw = r.read()
+        try:
+            return json.loads(raw)
+        except ValueError:
+            raise ApiError(502, "qBittorrent : réponse inattendue — est-ce bien l'adresse de son interface web ? "
+                                f"({raw[:80].decode(errors='replace').strip()})")
     except urllib.error.HTTPError as e:
-        raise ApiError(502, "qBittorrent : accès refusé (identifiants requis, ou adresse bloquée après trop d'essais)"
-                       if e.code in (401, 403) else f"qBittorrent : erreur {e.code}")
-    except (urllib.error.URLError, OSError, ValueError) as e:
-        raise ApiError(502, f"qBittorrent injoignable : {getattr(e, 'reason', e)}")
+        detail = e.read()[:120].decode(errors="replace").strip()
+        if e.code in (401, 403):
+            raise ApiError(502, "qBittorrent : accès refusé — " + (
+                "adresse bloquée après trop d'essais, attends ou redémarre qBittorrent" if "ban" in detail.lower() else
+                "renseigne l'identifiant et le mot de passe de l'interface web" if not s.get("qb_user") else
+                "identifiants refusés") + (f" ({detail})" if detail else ""))
+        raise ApiError(502, f"qBittorrent : erreur {e.code}" + (f" ({detail})" if detail else ""))
+    except (urllib.error.URLError, OSError) as e:
+        raise ApiError(502, f"qBittorrent injoignable depuis le conteneur PVE Hub : {getattr(e, 'reason', e)}")
 
 
 def pretty_name(n):
