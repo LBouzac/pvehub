@@ -478,3 +478,14 @@ for bad in ("exec 110 -- bash; rm -rf /", "exec abc", "exec 110 -- $(id)", "exec
         srv.r_lxc_approve({"grant": bad}); raise AssertionError(bad)
     except srv.ApiError:
         pass
+
+# téléchargements qBittorrent : noms lisibles, nouveaux et terminés
+for raw, nice in (("[YTS] Dune.Part.Two.2024.1080p.WEB-DL.x264", "Dune Part Two (2024)"), ("The.Bear.S03E02.MULTI.1080p", "The Bear S03E02"),
+                  ("Shogun.S01.COMPLETE.1080p", "Shogun S01"), ("Interstellar 2014 2160p", "Interstellar (2014)"), ("Big_Buck_Bunny.mkv", "Big Buck Bunny")):
+    assert srv.pretty_name(raw) == nice, (raw, srv.pretty_name(raw))
+known = {}
+assert [t for t, _, _ in srv.check_downloads(known, [{"hash": "a", "name": "A.2020", "progress": 0.1}])] == ["⬇️ Téléchargement lancé"]
+assert srv.check_downloads(known, [{"hash": "a", "name": "A.2020", "progress": 0.5}]) == []
+assert [t for t, _, _ in srv.check_downloads(known, [{"hash": "a", "name": "A.2020", "progress": 1}])] == ["✅ Téléchargement terminé"]
+assert srv.check_downloads(known, [{"hash": "a", "progress": 1}]) == [] and srv.check_downloads(known, []) == [] and known == {}
+assert "qb_pass" not in srv.public_settings({"qb_pass": "x"}) and srv.public_settings({"qb_pass": "x"})["qb_pass_set"]

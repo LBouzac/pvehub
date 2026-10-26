@@ -8,6 +8,7 @@ import base64
 import hashlib
 import hmac
 import http.client
+import http.cookiejar
 import json
 import os
 import re
@@ -1295,6 +1296,7 @@ def send_push(title, body, url="/", tag=None):
 
 
 ALERT_DEFAULTS = {"stopped": True, "disk": True, "disk_threshold": 90, "backup": True, "updates": True, "apps": True, "smart": True,
+                  "dl": False, "qb_url": "", "qb_user": "", "qb_pass": "",
                   "report": False, "report_time": "08:00", "tz": os.environ.get("TZ") or "UTC"}
 REPORTS_FILE = os.path.join(DATA_DIR, "reports.json")  # derniers rapports du matin
 
@@ -1318,11 +1320,69 @@ def alert_settings():
     return {**ALERT_DEFAULTS, **read_json(ALERTS_FILE, {}).get("settings", {})}
 
 
+def public_settings(s):
+    """Réglages renvoyés à l'app : jamais le mot de passe qBittorrent."""
+    return {**{k: v for k, v in s.items() if k != "qb_pass"}, "qb_pass_set": bool(s.get("qb_pass"))}
+
+
+# ---------------------------------------------------------------- téléchargements (qBittorrent, API web)
+def qb_torrents(s):
+    base = s["qb_url"].rstrip("/")
+    op = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()),
+                                     urllib.request.HTTPSHandler(context=NO_VERIFY))
+    hdr = {"Referer": base, "User-Agent": "PVEHub"}  # qBittorrent refuse les requêtes sans Referer de son adresse
+    try:
+        if s.get("qb_user"):
+            body = urllib.parse.urlencode({"username": s["qb_user"], "password": s.get("qb_pass", "")}).encode()
+            with op.open(urllib.request.Request(base + "/api/v2/auth/login", data=body, headers=hdr), timeout=8) as r:
+                if r.read().decode().strip() != "Ok.":
+                    raise ApiError(400, "qBittorrent : identifiant ou mot de passe refusé")  # pas 401 : l'app croirait sa session expirée
+        with op.open(urllib.request.Request(base + "/api/v2/torrents/info", headers=hdr), timeout=8) as r:
+            return json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        raise ApiError(502, "qBittorrent : accès refusé (identifiants requis, ou adresse bloquée après trop d'essais)"
+                       if e.code in (401, 403) else f"qBittorrent : erreur {e.code}")
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        raise ApiError(502, f"qBittorrent injoignable : {getattr(e, 'reason', e)}")
+
+
+def pretty_name(n):
+    """« [YTS] Dune.Part.Two.2024.1080p.WEB » → « Dune Part Two (2024) » ; « The.Bear.S03E02.MULTI » → « The Bear S03E02 »."""
+    n = re.sub(r"^\s*[\[(][^\])]*[\])]\s*", "", n)
+    n = re.sub(r"\.(mkv|mp4|avi)$", "", n, flags=re.I)
+    n = re.sub(r"[._]+", " ", n).strip()
+    m = re.search(r"\bS\d{1,2}(E\d{1,3})?\b", n, re.I)
+    if m:
+        return n[:m.end()].strip()
+    m = re.search(r"\b(19|20)\d{2}\b", n)
+    if m and m.start() > 0:
+        return f"{n[:m.start()].strip(' -([')} ({m.group(0)})"
+    return re.split(r"\b(2160p|1080p|720p|480p|x26[45]|hevc|bluray|web-?dl|webrip|multi|truefrench|french|vostfr)\b", n, maxsplit=1, flags=re.I)[0].strip(" -") or n
+
+
+def check_downloads(known, torrents):
+    """known : {hash: terminé ?}, mis à jour sur place. Retourne [(titre, texte, hash)] des nouveaux et des terminés."""
+    out, seen = [], set()
+    for t in torrents:
+        h, done = str(t.get("hash", "")), float(t.get("progress") or 0) >= 1
+        if not h:
+            continue
+        seen.add(h)
+        if h not in known:
+            out.append(("✅ Téléchargement terminé" if done else "⬇️ Téléchargement lancé", pretty_name(t.get("name", "")), h))
+        elif done and not known[h]:
+            out.append(("✅ Téléchargement terminé", pretty_name(t.get("name", "")), h))
+        known[h] = done
+    for h in [h for h in known if h not in seen]:
+        del known[h]  # supprimé de qBittorrent
+    return out
+
+
 def r_push_info(_):
     if not PUSH_OK:
         return {"available": False}
     return {"available": True, "key": b64u(raw_pub(vapid_key())), "devices": len(read_json(PUSH_FILE, [])),
-            "settings": alert_settings()}
+            "settings": public_settings(alert_settings())}
 
 
 def r_push_subscribe(d):
@@ -1356,9 +1416,16 @@ def r_push_test(_):
 
 def r_alert_settings(d):
     s = alert_settings()
-    for k in ("stopped", "disk", "backup", "updates", "report", "apps", "smart"):
+    for k in ("stopped", "disk", "backup", "updates", "report", "apps", "smart", "dl"):
         if k in d:
             s[k] = bool(d[k])
+    if any(k in d for k in ("qb_url", "qb_user", "qb_pass")):
+        s["qb_url"] = clean_url(d.get("qb_url", s["qb_url"])).rstrip("/")
+        s["qb_user"] = str(d.get("qb_user", s["qb_user"]))[:100]
+        if d.get("qb_pass"):  # vide : on garde l'ancien
+            s["qb_pass"] = str(d["qb_pass"])[:200]
+        qb_torrents(s)  # on vérifie tout de suite : une erreur s'affiche dans l'app au lieu d'alertes muettes
+        s["dl"] = True
     if "report_time" in d:
         if not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", str(d["report_time"])):
             raise ApiError(400, "Heure invalide")
@@ -1380,7 +1447,7 @@ def r_alert_settings(d):
         cur = read_json(ALERTS_FILE, {})
         cur["settings"] = s
         write_json(ALERTS_FILE, cur)
-    return {"settings": s}
+    return {"settings": public_settings(s)}
 
 
 # ---------------------------------------------------------------- surveillance (alertes)
@@ -1693,6 +1760,20 @@ def monitor_once(ctx):
                 log_event("alert", f"{name} répond à nouveau", url="/#apps")
         except ApiError:
             pass
+    # téléchargements qBittorrent : chaque minute ; au premier passage, la liste est notée sans prévenir
+    if s["dl"] and s["qb_url"]:
+        try:
+            torrents, first = qb_torrents(s), "qb" not in state
+            for title, body, h in check_downloads(state.setdefault("qb", {}), torrents):
+                if not first:
+                    send_push(title, body, "/", tag="dl-" + h[:16])
+                    log_event("download", title, body)
+        except ApiError as e:
+            if state.get("qb_err") != e.msg:  # une seule fois par panne
+                log_event("alert", "Téléchargements : qBittorrent ne répond pas", e.msg)
+            state["qb_err"] = e.msg
+        else:
+            state.pop("qb_err", None)
     # disques physiques : toutes les 6 h (interroger SMART trop souvent réveille les disques en veille)
     if s["smart"] and now - state.get("smart_at", 0) >= 6 * 3600:
         state["smart_at"] = now

@@ -237,6 +237,9 @@ Les notifications ont besoin de l'adresse HTTPS (Tailscale, ci-dessus). Sur iPho
    - **Sauvegardes** : une sauvegarde en échec, et chaque matin les machines incluses dans une sauvegarde planifiée
      mais pas sauvegardées depuis 7 jours ;
    - **Résumé des mises à jour** : une fois par semaine, en matinée ;
+   - **Téléchargements** : un film ou une série qui commence, puis qui se termine dans qBittorrent (vérifié chaque
+     minute). Touche **qBittorrent** pour donner l'adresse de son interface web (Outils → Options → Interface web) et,
+     s'il en demande, ses identifiants. Le mot de passe reste sur le serveur PVE Hub, il n'est jamais renvoyé à l'app ;
    - **Rapport du matin** : chaque jour à l'heure choisie (heure de ton téléphone), Hermes lit l'état du serveur
      (machines, sauvegardes de la nuit, disques, mises à jour, alertes des dernières 24 h) et t'envoie l'essentiel
      en une phrase. Toucher la notification ouvre le rapport complet dans la conversation : tu peux lui répondre

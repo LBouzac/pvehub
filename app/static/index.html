@@ -1757,6 +1757,8 @@ $("#maint").addEventListener("click", async e => {
 
 // ---------- quoi de neuf : la plus récente en premier ; l'id (date + lettre) doit croître à chaque ajout
 const CHANGES = [
+  { id: "2026-10-26a", title: "Téléchargements", items: [
+    "Notification quand un film ou une série commence, puis finit de se télécharger dans qBittorrent : Réglages → Notifications → Téléchargements."] },
   { id: "2026-10-24b", title: "Hermes", items: [
     "Autorisations « lxc-approve » : en plus d'Autoriser, tu peux choisir Pendant 1 h ou Toute la conversation. La même demande est alors autorisée toute seule, et Hermes continue sans attendre."] },
   { id: "2026-10-24a", title: "Apps", items: [
@@ -1870,6 +1872,8 @@ function notifHtml() {
     ${s.disk ? `<label class="cell"><div class="body">Seuil</div><select class="picker" data-alert="disk_threshold" style="direction:ltr;text-align-last:right">${[80, 85, 90, 95].map(v => `<option value="${v}" ${s.disk_threshold == v ? "selected" : ""}>${v} %</option>`).join("")}</select>${I.chev}</label>` : ""}
     ${sw("backup", "Sauvegardes", "Échec, ou machine non sauvegardée depuis 7 jours")}
     ${sw("updates", "Résumé des mises à jour", "Une fois par semaine")}
+    ${sw("dl", "Téléchargements", "Film ou série lancé, puis terminé (qBittorrent)")}
+    ${s.dl ? `<button class="cell tap" id="qbCfg"><div class="body"><div class="t">qBittorrent</div><div class="s ell">${s.qb_url ? esc(s.qb_url) + (s.qb_user ? " · " + esc(s.qb_user) : "") : "À configurer"}</div></div>${I.chev}</button>` : ""}
     ${sw("report", "Rapport du matin", S.ov?.hermes ? "Hermes résume l'état du serveur chaque jour" : "Résumé de l'état du serveur chaque jour")}
     ${s.report ? `<label class="cell"><div class="body">Heure du rapport</div><input type="time" class="picker" data-alert="report_time" value="${esc(s.report_time)}" style="direction:ltr"></label>` : ""}
     <button class="cell tap act" id="reportNow"><div class="body">Recevoir le rapport maintenant</div></button>`;
@@ -1877,6 +1881,19 @@ function notifHtml() {
 function notifFooter() {
   const n = S.push?.devices;
   return S.push?.available ? `<div class="ftr">${n ? `${n} appareil${n > 1 ? "s" : ""} abonné${n > 1 ? "s" : ""}. ` : "Aucun appareil abonné pour l'instant. "}Les alertes sont vérifiées chaque minute par le serveur, même quand l'app est fermée.</div>` : "";
+}
+
+// qBittorrent : adresse de son interface web (Outils → Options → Interface web), identifiant et mot de passe
+async function qbConfig() {
+  const s = S.push.settings;
+  const v = await alertForm("qBittorrent", "L'adresse de son interface web, et ses identifiants s'il en demande.",
+    [{ name: "qb_url", ph: "http://192.168.1.30:8080", value: s.qb_url || "" }, { name: "qb_user", ph: "Identifiant (facultatif)", value: s.qb_user || "" },
+     { name: "qb_pass", ph: s.qb_pass_set ? "Mot de passe (inchangé)" : "Mot de passe", type: "password" }]);
+  if (!v) return;
+  const t = toast("⏳ Connexion à qBittorrent…", 20000);
+  try { S.push.settings = (await api("/api/alerts", { body: { ...v, qb_url: withScheme(v.qb_url.trim()) } })).settings; t.remove(); toast("✅ qBittorrent connecté"); }
+  catch (err) { t.remove(); toast("❌ " + err.message, 7000); }
+  setSec("notif");
 }
 
 // ---------- rapport du matin
@@ -1941,7 +1958,7 @@ function securityHtml() {
 }
 
 // ---------- journal : alertes, connexions, actions
-const J_KIND = { alert: [I.bell, "red"], login: [I.shield, "accent"], security: [I.shield, "orange"], store: [I.bag, "purple"], update: [I.reboot, "green"], report: [I.chat, "indigo"] };
+const J_KIND = { download: [I.backup, "blue"], alert: [I.bell, "red"], login: [I.shield, "accent"], security: [I.shield, "orange"], store: [I.bag, "purple"], update: [I.reboot, "green"], report: [I.chat, "indigo"] };
 const J_FILTERS = [["", "Tout"], ["alert", "Alertes"], ["login", "Connexions"], ["actions", "Actions"]];
 function openJournal(filter) {
   S.jOpen = true; S.jFilter = filter || ""; $("#journal").scrollTop = 0; $("#journal").classList.add("open"); history.pushState({ j: 1 }, "");
@@ -2067,11 +2084,13 @@ $("#settings").addEventListener("change", async e => {
   try { S.push.settings = (await api("/api/alerts", { body: { [k]: v, tz: Intl.DateTimeFormat().resolvedOptions().timeZone } })).settings; }
   catch (err) { toast("❌ " + err.message); ok = false; }
   // on ne redessine que si une option apparaît ou disparaît, ou pour remettre l'interrupteur après un échec
-  if (!ok || k === "disk" || k === "report") setSec("notif");
+  if (!ok || k === "disk" || k === "report" || k === "dl") setSec("notif");
+  if (ok && k === "dl" && v && !S.push.settings.qb_url) qbConfig();
 });
 $("#settings").addEventListener("click", async e => {
   const cp = e.target.closest("[data-copy]"); if (cp) return copyText(cp.dataset.copy);
   if (e.target.closest("#pushOn")) { await enablePush(); return setSec("notif"); }
+  if (e.target.closest("#qbCfg")) return qbConfig();
   if (e.target.closest("#reportNow")) { closeSettings(); return reportNow(); }
   if (e.target.closest("#pushOff")) { await disablePush(); return setSec("notif"); }
   if (e.target.closest("#pushTest")) {
