@@ -50,7 +50,9 @@ cd ios && swiftc Sources/PVEHub/Logic.swift Checks/main.swift -o /tmp/pvehub-che
 
 ## Limites
 
-- **Notifications** : pas encore de push natif (il faudrait que le serveur envoie à APNs avec une clé du compte payant).
+- **Notifications** : push natif (APNs), build TestFlight seulement. Une fois : developer.apple.com → Keys → + →
+  Apple Push Notifications service, puis dans l'app Réglages → Notifications → Configurer la clé Apple Push
+  (Team ID, Key ID, contenu du .p8). Le conteneur a besoin de `curl` (installé par la mise à jour de PVE Hub).
   Les alertes continuent d'arriver sur la version web installée depuis Safari.
 - **Installée avec `xtool dev`** : le profil peut expirer au bout de 7 jours ; relance `xtool dev`, ou passe par
   TestFlight.

@@ -1243,10 +1243,62 @@ def vapid_key():
 def vapid_header(endpoint, key):
     aud = "{0.scheme}://{0.netloc}".format(urllib.parse.urlsplit(endpoint))
     claims = {"aud": aud, "exp": int(time.time()) + 3000, "sub": f"https://github.com/{UPDATE_REPO}"}
-    signing_input = b64u(json.dumps({"typ": "JWT", "alg": "ES256"}).encode()) + "." + b64u(json.dumps(claims).encode())
+    return f"vapid t={es256_jwt(key, {'typ': 'JWT', 'alg': 'ES256'}, claims)}, k={b64u(raw_pub(key))}"
+
+
+def es256_jwt(key, header, claims):
+    signing_input = b64u(json.dumps(header).encode()) + "." + b64u(json.dumps(claims).encode())
     r, s = decode_dss_signature(key.sign(signing_input.encode(), ec.ECDSA(hashes.SHA256())))
-    jwt = signing_input + "." + b64u(r.to_bytes(32, "big") + s.to_bytes(32, "big"))
-    return f"vapid t={jwt}, k={b64u(raw_pub(key))}"
+    return signing_input + "." + b64u(r.to_bytes(32, "big") + s.to_bytes(32, "big"))
+
+
+# App iOS native : notifications par APNs, avec la clé « Apple Push Notifications » du compte développeur
+APNS_FILE = os.path.join(DATA_DIR, "apns.json")
+RE_APNS_TOKEN = re.compile(r"^[0-9a-f]{64,200}$")
+RE_BUNDLE = re.compile(r"^[A-Za-z0-9.-]{1,155}$")
+_apns_jwt = {}  # Apple refuse un nouveau jeton plus d'une fois toutes les 20 min : on le garde 40 min
+
+
+def load_p8(text):
+    """Le .p8 collé tel quel, même sans ses retours à la ligne (un champ de texte de l'iPhone les enlève)."""
+    return serialization.load_der_private_key(base64.b64decode(re.sub(r"-----[A-Z ]+-----|\s", "", text)), None)
+
+
+def apns_config():
+    c = read_json(APNS_FILE, {})
+    return c if c.get("team") and c.get("key_id") and c.get("key") else None
+
+
+def apns_jwt(c):
+    if _apns_jwt.get("kid") != c["key_id"] or time.time() - _apns_jwt["t"] > 2400:
+        jwt = es256_jwt(load_p8(c["key"]), {"alg": "ES256", "kid": c["key_id"]}, {"iss": c["team"], "iat": int(time.time())})
+        _apns_jwt.update(kid=c["key_id"], t=time.time(), jwt=jwt)
+    return _apns_jwt["jwt"]
+
+
+def send_apns(sub, title, body, url, tag):
+    """Retourne le code HTTP d'Apple (0 si pas envoyé). APNs n'accepte que HTTP/2, que urllib ne parle pas : curl s'en charge."""
+    c = apns_config()
+    if not c:
+        print("Notification iOS non envoyée : clé APNs à configurer dans les Réglages de l'app", file=sys.stderr)
+        return 0
+    cmd = ["curl", "-sS", "--http2", "--max-time", "15", "-w", "\n%{http_code}", "--data-binary", "@-",
+           "-H", "apns-push-type: alert", "-H", "apns-priority: 10", "-H", f"apns-topic: {sub['topic']}",
+           "-H", f"authorization: bearer {apns_jwt(c)}"]
+    if tag:
+        cmd += ["-H", "apns-collapse-id: " + tag[:64]]
+    payload = json.dumps({"aps": {"alert": {"title": title, "body": body}, "sound": "default"}, "url": url}).encode()
+    try:  # serveur de production : celui des builds TestFlight et App Store
+        out = subprocess.run(cmd + [f"https://api.push.apple.com/3/device/{sub['apns']}"], input=payload, capture_output=True, timeout=20)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        print("Notification iOS non envoyée (curl installé ?) :", repr(e), file=sys.stderr)
+        return 0
+    resp, _, code = out.stdout.decode(errors="replace").rpartition("\n")
+    code = int(code) if code.isdigit() else 0
+    if code != 200:
+        print("Notification iOS refusée :", code, resp[:200] or out.stderr.decode(errors="replace")[:200], file=sys.stderr)
+    # jeton d'un autre appareil/build (BadDeviceToken) ou app supprimée (410) : abonnement à oublier
+    return 410 if code == 400 and "BadDeviceToken" in resp else code
 
 
 def hkdf(salt, ikm, info, length):
@@ -1275,6 +1327,12 @@ def send_push(title, body, url="/", tag=None):
     key, ok, gone = vapid_key(), 0, []
     payload = json.dumps({"title": title, "body": body, "url": url, "tag": tag}).encode()
     for sub in read_json(PUSH_FILE, []):
+        if "apns" in sub:
+            code = send_apns(sub, title, body, url, tag)
+            ok += code == 200
+            if code == 410:
+                gone.append(sub["endpoint"])
+            continue
         try:
             req = urllib.request.Request(sub["endpoint"], method="POST",
                                          data=encrypt_push(payload, sub["keys"]["p256dh"], sub["keys"]["auth"]))
@@ -1393,21 +1451,27 @@ def check_downloads(known, torrents):
 def r_push_info(_):
     if not PUSH_OK:
         return {"available": False}
-    return {"available": True, "key": b64u(raw_pub(vapid_key())), "devices": len(read_json(PUSH_FILE, [])),
+    return {"available": True, "key": b64u(raw_pub(vapid_key())), "devices": len(read_json(PUSH_FILE, [])), "apns": bool(apns_config()),
             "settings": public_settings(alert_settings())}
 
 
 def r_push_subscribe(d):
     if not PUSH_OK:
         raise ApiError(503, "Notifications indisponibles : mets à jour PVE Hub depuis le Shell de Proxmox")
+    if d.get("apns") is not None:  # app iOS native
+        token, topic = str(d["apns"]).lower(), str(d.get("topic", ""))
+        if not RE_APNS_TOKEN.match(token) or not RE_BUNDLE.match(topic):
+            raise ApiError(400, "Abonnement invalide")
+        d = {**d, "subscription": {"endpoint": "apns:" + token, "keys": {"p256dh": "-", "auth": "-"}}}
     sub = d.get("subscription") or {}
     endpoint, keys = str(sub.get("endpoint", "")), sub.get("keys") or {}
-    if not endpoint.startswith("https://") or len(endpoint) > 1000 or not keys.get("p256dh") or not keys.get("auth"):
+    if not endpoint.startswith(("https://", "apns:")) or len(endpoint) > 1000 or not keys.get("p256dh") or not keys.get("auth"):
         raise ApiError(400, "Abonnement invalide")
     with _push_lock:
         subs = [s for s in read_json(PUSH_FILE, []) if s["endpoint"] != endpoint]
         subs.append({"endpoint": endpoint, "keys": {"p256dh": str(keys["p256dh"]), "auth": str(keys["auth"])},
-                     "name": str(d.get("name", ""))[:60], "at": int(time.time())})
+                     "name": str(d.get("name", ""))[:60], "at": int(time.time()),
+                     **({"apns": endpoint[5:], "topic": str(d["topic"])} if endpoint.startswith("apns:") else {})})
         write_json(PUSH_FILE, subs)
     return {"ok": True, "devices": len(subs)}
 
@@ -1417,6 +1481,34 @@ def r_push_unsubscribe(d):
         subs = [s for s in read_json(PUSH_FILE, []) if s["endpoint"] != d.get("endpoint")]
         write_json(PUSH_FILE, subs)
     return {"ok": True, "devices": len(subs)}
+
+
+def r_push_apns(d):
+    """Clé APNs (Certificates, Identifiers & Profiles → Keys) : Team ID, Key ID et contenu du .p8. Clé vide = retirée."""
+    if not PUSH_OK:
+        raise ApiError(503, "Notifications indisponibles : mets à jour PVE Hub depuis le Shell de Proxmox")
+    team, kid, key = (str(d.get(k, "")).strip() for k in ("team", "key_id", "key"))
+    if not key:
+        try:
+            os.remove(APNS_FILE)
+        except OSError:
+            pass
+        return {"ok": True, "apns": False}
+    if not re.match(r"^[A-Z0-9]{10}$", team) or not re.match(r"^[A-Z0-9]{10}$", kid):
+        raise ApiError(400, "Team ID et Key ID : 10 lettres majuscules ou chiffres chacun")
+    try:
+        k = load_p8(key)
+        if not isinstance(k, ec.EllipticCurvePrivateKey):
+            raise ValueError
+        pem = k.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                         serialization.NoEncryption()).decode()
+    except (ValueError, TypeError):
+        raise ApiError(400, "Clé illisible : colle tout le contenu du fichier .p8")
+    with _push_lock:
+        write_json(APNS_FILE, {"team": team, "key_id": kid, "key": pem})
+        os.chmod(APNS_FILE, 0o600)
+    _apns_jwt.clear()
+    return {"ok": True, "apns": True}
 
 
 def r_push_test(_):
@@ -2979,6 +3071,7 @@ ROUTES = {
     ("POST", "/api/push/subscribe"): r_push_subscribe,
     ("POST", "/api/push/unsubscribe"): r_push_unsubscribe,
     ("POST", "/api/push/test"): r_push_test,
+    ("POST", "/api/push/apns"): r_push_apns,
     ("POST", "/api/alerts"): r_alert_settings,
     ("GET", "/api/reports"): r_reports,
     ("GET", "/api/store"): r_store,

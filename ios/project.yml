@@ -15,6 +15,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.lbouzac.pvehub
         PRODUCT_NAME: PVEHub
         INFOPLIST_FILE: Info.plist
+        CODE_SIGN_ENTITLEMENTS: PVEHub.entitlements
         GENERATE_INFOPLIST_FILE: YES
         # GENERATE_INFOPLIST_FILE écrase les versions d'Info.plist par celles-ci (le numéro de build vient du workflow)
         MARKETING_VERSION: "1.0"

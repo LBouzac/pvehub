@@ -1,5 +1,6 @@
 """Tests rapides : python3 app/test_server.py (non inclus dans l'installeur)."""
 import importlib.util
+import json
 import os
 
 os.environ.setdefault("PVE_URL", "http://x")
@@ -72,6 +73,40 @@ if srv.PUSH_OK:
                            "BTBZMqHH6r4Tts7J_aSIgg", salt=srv.unb64u("DGv6ra1nlYgDCS1FRnbzlw"), eph=eph)
     assert srv.b64u(out) == ("DGv6ra1nlYgDCS1FRnbzlwAAEABBBP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A_"
                              "yl95bQpu6cVPTpK4Mqgkf1CXztLVBSt2Ks3oZwbuwXPXLWyouBWLVWGNWQexSgSxsj_Qulcy4a-fN")
+    # app iOS : clé .p8 collée sans retours à la ligne, jeton APNs signé, envoi par curl en HTTP/2
+    import tempfile, types
+    srv.DATA_DIR = tempfile.mkdtemp()
+    srv.PUSH_FILE, srv.APNS_FILE, srv.VAPID_FILE = (os.path.join(srv.DATA_DIR, f) for f in ("push.json", "apns.json", "vapid.pem"))
+    k = ec.generate_private_key(ec.SECP256R1())
+    from cryptography.hazmat.primitives import serialization as ser
+    p8 = k.private_bytes(ser.Encoding.PEM, ser.PrivateFormat.PKCS8, ser.NoEncryption()).decode().replace("\n", " ")
+    assert srv.r_push_apns({"team": "ABCDE12345", "key_id": "KEY1234567", "key": p8}) == {"ok": True, "apns": True}
+    tok = "ab" * 32
+    srv.r_push_subscribe({"apns": tok.upper(), "topic": "com.lbouzac.pvehub", "name": "iPhone"})
+    try:
+        srv.r_push_subscribe({"apns": "../x", "topic": "com.lbouzac.pvehub"}); raise AssertionError("jeton accepté")
+    except srv.ApiError:
+        pass
+    calls, code, real_subprocess = [], ["200"], srv.subprocess
+    srv.subprocess = types.SimpleNamespace(run=lambda cmd, **kw: calls.append((cmd, kw)) or types.SimpleNamespace(
+        stdout=('{"reason":"BadDeviceToken"}\n400' if code[0] == "400" else "\n" + code[0]).encode(), stderr=b""),
+        TimeoutExpired=TimeoutError)
+    assert srv.send_push("T", "B", "/#maint", "tag") == 1
+    cmd, kw = calls[0]
+    assert cmd[-1] == f"https://api.push.apple.com/3/device/{tok}" and "--http2" in cmd and "apns-topic: com.lbouzac.pvehub" in cmd
+    assert json.loads(kw["input"]) == {"aps": {"alert": {"title": "T", "body": "B"}, "sound": "default"}, "url": "/#maint"}
+    jwt = next(h for h in cmd if h.startswith("authorization: bearer ")).split()[-1]
+    head, claims, sig = jwt.split(".")
+    assert json.loads(srv.unb64u(head)) == {"alg": "ES256", "kid": "KEY1234567"} and json.loads(srv.unb64u(claims))["iss"] == "ABCDE12345"
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
+    raw = srv.unb64u(sig)
+    k.public_key().verify(encode_dss_signature(int.from_bytes(raw[:32], "big"), int.from_bytes(raw[32:], "big")),
+                          f"{head}.{claims}".encode(), ec.ECDSA(hashes.SHA256()))
+    code[0] = "400"  # jeton refusé : l'abonnement disparaît
+    assert srv.send_push("T", "B") == 0 and srv.read_json(srv.PUSH_FILE, None) == []
+    assert srv.r_push_apns({"key": ""})["apns"] is False and srv.apns_config() is None
+    srv.subprocess = real_subprocess
 else:
     print("(cryptography absent : test des notifications ignoré)")
 

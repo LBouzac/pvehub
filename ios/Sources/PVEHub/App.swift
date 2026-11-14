@@ -1,7 +1,9 @@
 import SwiftUI
+import UserNotifications
 
 @main
 struct PVEHubApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var hub = Hub.shared
     @AppStorage("mode") private var mode = "auto"
     @AppStorage("accent") private var accent = "blue"
@@ -14,6 +16,30 @@ struct PVEHubApp: App {
                 .tint(accentTint(accent))
                 .preferredColorScheme(mode == "light" ? .light : mode == "dark" ? .dark : nil)
         }
+    }
+}
+
+/// Notifications natives (APNs) : jeton transmis au serveur, bannière même app ouverte, bon écran au toucher
+final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions _: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        UNUserNotificationCenter.current().delegate = self
+        return true
+    }
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        let hex = deviceToken.map { String(format: "%02x", $0) }.joined()
+        Task { @MainActor in await Hub.shared.pushRegistered(hex) }
+    }
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        Task { @MainActor in Hub.shared.toast("❌ Notifications : " + error.localizedDescription, seconds: 7) }
+    }
+    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+        [.banner, .list, .sound]
+    }
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+        // même lien que la version web : « /#maint », « /#chat=… »
+        guard let url = response.notification.request.content.userInfo["url"] as? String, let i = url.firstIndex(of: "#") else { return }
+        let link = String(url[url.index(after: i)...])
+        await MainActor.run { Hub.shared.openLink(link) }
     }
 }
 

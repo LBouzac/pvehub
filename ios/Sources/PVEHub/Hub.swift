@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 enum Tab: Hashable { case server, guests, apps, exec, chat }
 
@@ -87,6 +88,7 @@ final class Hub: ObservableObject {
     }
 
     func afterLogin() async {
+        Task { await refreshPush() }
         async let s: () = loadSched()
         async let v: () = checkVersion()
         async let m: () = loadMaint()
@@ -334,6 +336,36 @@ final class Hub: ObservableObject {
             }
             toast("Le serveur ne répond pas encore : réessaie dans un moment.", seconds: 8)
         } catch { fail(error, seconds: 8) }
+    }
+
+    // MARK: notifications natives (APNs)
+    @Published var pushToken: String?
+    private var pushAsked = false
+
+    /// Demande l'autorisation puis le jeton à Apple ; la réponse arrive dans AppDelegate → pushRegistered
+    func enablePush() async {
+        do {
+            guard try await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) else {
+                toast("Notifications refusées. Pour les autoriser : Réglages de l'iPhone → Notifications → PVE Hub.", seconds: 7)
+                return
+            }
+            pushAsked = true
+            UIApplication.shared.registerForRemoteNotifications()
+        } catch { fail(error) }
+    }
+    /// À chaque connexion si déjà autorisé : le jeton peut changer (réinstallation, restauration)
+    func refreshPush() async {
+        if await UNUserNotificationCenter.current().notificationSettings().authorizationStatus == .authorized {
+            UIApplication.shared.registerForRemoteNotifications()
+        }
+    }
+    func pushRegistered(_ token: String) async {
+        do {
+            try await API.shared.post("/api/push/subscribe", ["apns": token, "topic": Bundle.main.bundleIdentifier ?? "", "name": UIDevice.current.name])
+            pushToken = token
+            if pushAsked { toast("🔔 Notifications activées sur cet iPhone") }
+        } catch { if pushAsked { fail(error) } }
+        pushAsked = false
     }
 
     // MARK: navigation entre onglets

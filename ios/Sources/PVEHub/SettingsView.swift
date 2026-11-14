@@ -71,11 +71,19 @@ struct SettingsView: View {
                         Text("Le module de notifications n'est pas installé. Relance la mise à jour de PVE Hub.").font(.subheadline).foregroundStyle(.secondary)
                     }
                 } else {
-                    // shortcut: pas de push natif (APNs exige un compte Apple Developer payant et un relais côté serveur) ; les alertes arrivent sur les appareils abonnés via la version web
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Reçues via la version web")
-                        Text("Pour recevoir les alertes sur ce téléphone, ouvre PVE Hub dans Safari (adresse Tailscale en https), ajoute-le à l'écran d'accueil et active les notifications depuis ses Réglages.")
-                            .font(.subheadline).foregroundStyle(.secondary)
+                    Button { Task { await apnsConfig() } } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(p.apns.bool ? "Clé Apple Push" : "Configurer la clé Apple Push").foregroundStyle(.primary)
+                            Text(p.apns.bool ? "Configurée sur le serveur" : "Une seule fois : la clé APNs de ton compte Apple Developer, pour que le serveur puisse joindre l'iPhone.")
+                                .font(.subheadline).foregroundStyle(.secondary)
+                        }
+                    }
+                    if p.apns.bool {
+                        if hub.pushToken == nil {
+                            Button("Activer sur cet iPhone") { Task { await hub.enablePush() } }
+                        } else {
+                            LabeledContent("Cet iPhone", value: "Activées")
+                        }
                     }
                     Button("Envoyer une notification de test") {
                         Task {
@@ -142,6 +150,20 @@ struct SettingsView: View {
             push = J(p)
             if k == "dl", (v as? Bool) == true, s.qb_url.str.isEmpty { await qbConfig() }
         } catch { hub.fail(error) }
+    }
+
+    /// Clé « Apple Push Notifications service » : developer.apple.com → Certificates, Identifiers & Profiles → Keys
+    private func apnsConfig() async {
+        guard let v = await Dialog.form("Clé Apple Push",
+                                        "developer.apple.com → Keys → + → Apple Push Notifications service (Sandbox & Production). Team ID : en haut à droite. Colle tout le contenu du fichier .p8.",
+                                        [.init(placeholder: "Team ID"), .init(placeholder: "Key ID"), .init(placeholder: "-----BEGIN PRIVATE KEY-----…")]) else { return }
+        do {
+            let r = try await API.shared.post("/api/push/apns", ["team": v[0].trimmed.uppercased(), "key_id": v[1].trimmed.uppercased(), "key": v[2]])
+            var p = push?.dict ?? [:]
+            p["apns"] = r.apns.v
+            push = J(p)
+            if r.apns.bool && hub.pushToken == nil { await hub.enablePush() } else { hub.toast("✅ Clé enregistrée") }
+        } catch { hub.fail(error, seconds: 7) }
     }
 
     /// qBittorrent : adresse de son interface web (Outils → Options → Interface web), identifiant et mot de passe
