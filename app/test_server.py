@@ -72,6 +72,16 @@ if srv.PUSH_OK:
                            "BTBZMqHH6r4Tts7J_aSIgg", salt=srv.unb64u("DGv6ra1nlYgDCS1FRnbzlw"), eph=eph)
     assert srv.b64u(out) == ("DGv6ra1nlYgDCS1FRnbzlwAAEABBBP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A_"
                              "yl95bQpu6cVPTpK4Mqgkf1CXztLVBSt2Ks3oZwbuwXPXLWyouBWLVWGNWQexSgSxsj_Qulcy4a-fN")
+    # jeton ES256 (VAPID et APNs) : signature vérifiable avec la clé publique, en-tête complété
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
+    k = ec.generate_private_key(ec.SECP256R1())
+    jwt = srv.es256_jwt({"kid": "ABC"}, {"iss": "TEAM"}, k)
+    h, c, sig = jwt.split(".")
+    assert srv.json.loads(srv.unb64u(h)) == {"typ": "JWT", "alg": "ES256", "kid": "ABC"}
+    raw = srv.unb64u(sig)
+    k.public_key().verify(encode_dss_signature(int.from_bytes(raw[:32], "big"), int.from_bytes(raw[32:], "big")),
+                          (h + "." + c).encode(), ec.ECDSA(hashes.SHA256()))
 else:
     print("(cryptography absent : test des notifications ignoré)")
 

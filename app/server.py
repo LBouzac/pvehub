@@ -14,6 +14,7 @@ import os
 import re
 import secrets
 import shlex
+import shutil
 import ssl
 import subprocess
 import sys
@@ -1240,13 +1241,55 @@ def vapid_key():
             return key
 
 
+def es256_jwt(header, claims, key):
+    signing_input = b64u(json.dumps({"typ": "JWT", "alg": "ES256", **header}).encode()) + "." + b64u(json.dumps(claims).encode())
+    r, s = decode_dss_signature(key.sign(signing_input.encode(), ec.ECDSA(hashes.SHA256())))
+    return signing_input + "." + b64u(r.to_bytes(32, "big") + s.to_bytes(32, "big"))
+
+
 def vapid_header(endpoint, key):
     aud = "{0.scheme}://{0.netloc}".format(urllib.parse.urlsplit(endpoint))
     claims = {"aud": aud, "exp": int(time.time()) + 3000, "sub": f"https://github.com/{UPDATE_REPO}"}
-    signing_input = b64u(json.dumps({"typ": "JWT", "alg": "ES256"}).encode()) + "." + b64u(json.dumps(claims).encode())
-    r, s = decode_dss_signature(key.sign(signing_input.encode(), ec.ECDSA(hashes.SHA256())))
-    jwt = signing_input + "." + b64u(r.to_bytes(32, "big") + s.to_bytes(32, "big"))
-    return f"vapid t={jwt}, k={b64u(raw_pub(key))}"
+    return f"vapid t={es256_jwt({}, claims, key)}, k={b64u(raw_pub(key))}"
+
+
+# APNs (app iOS native) : clé .p8 du compte Apple Developer dans data/apns.p8, APNS_KEY_ID et APNS_TEAM_ID dans .env
+APNS_KEY_FILE = os.path.join(DATA_DIR, "apns.p8")
+APNS_TOPIC = "com.lbouzac.pvehub"
+RE_APNS = re.compile(r"^[0-9a-f]{64,200}$")
+_apns_jwt = [0.0, ""]
+
+
+def apns_ready():
+    return (PUSH_OK and bool(os.environ.get("APNS_KEY_ID") and os.environ.get("APNS_TEAM_ID"))
+            and os.path.exists(APNS_KEY_FILE) and shutil.which("curl") is not None)
+
+
+def apns_jwt():
+    # Apple refuse un jeton refait plus d'une fois toutes les 20 min et le périme après 1 h : on le garde 50 min
+    with _push_lock:
+        if time.time() - _apns_jwt[0] > 3000:
+            with open(APNS_KEY_FILE, "rb") as f:
+                key = serialization.load_pem_private_key(f.read(), None)
+            _apns_jwt[:] = [time.time(), es256_jwt({"kid": os.environ["APNS_KEY_ID"]},
+                                                   {"iss": os.environ["APNS_TEAM_ID"], "iat": int(time.time())}, key)]
+        return _apns_jwt[1]
+
+
+def send_apns(token, title, body, url, tag):
+    """Envoie à un iPhone. APNs n'accepte que HTTP/2, d'où curl. Retourne (code HTTP, réponse d'Apple)."""
+    if not apns_ready():
+        return 0, "APNs non configuré sur ce serveur"
+    cmd = ["curl", "-sS", "--http2", "-m", "15", "-o", "-", "-w", "\n%{http_code}", "--data-binary", "@-",
+           "-H", "authorization: bearer " + apns_jwt(), "-H", "apns-topic: " + APNS_TOPIC,
+           "-H", "apns-push-type: alert", "-H", "apns-priority: 10"]
+    if tag:  # remplace la notification précédente de même tag, comme sur le web (64 octets au plus)
+        cmd += ["-H", "apns-collapse-id: " + re.sub(r"[^\w.-]", "", tag, flags=re.ASCII)[:64]]
+    payload = {"aps": {"alert": {"title": title, "body": body}, "sound": "default"}, "url": url}
+    p = subprocess.run(cmd + ["https://api.push.apple.com/3/device/" + token], input=json.dumps(payload).encode(),
+                       capture_output=True, timeout=20)
+    out, _, code = p.stdout.decode(errors="replace").rpartition("\n")
+    return (int(code) if code.isdigit() else 0), (out or p.stderr.decode(errors="replace")).strip()
 
 
 def hkdf(salt, ikm, info, length):
@@ -1276,6 +1319,15 @@ def send_push(title, body, url="/", tag=None):
     payload = json.dumps({"title": title, "body": body, "url": url, "tag": tag}).encode()
     for sub in read_json(PUSH_FILE, []):
         try:
+            if sub["endpoint"].startswith("apns:"):
+                code, why = send_apns(sub["endpoint"][5:], title, body, url, tag)
+                if code == 200:
+                    ok += 1
+                    continue
+                if code == 410 or "BadDeviceToken" in why:
+                    gone.append(sub["endpoint"])  # app supprimée, ou jeton d'une build de développement
+                print("Notification iOS refusée :", code, why[:200], file=sys.stderr)
+                continue
             req = urllib.request.Request(sub["endpoint"], method="POST",
                                          data=encrypt_push(payload, sub["keys"]["p256dh"], sub["keys"]["auth"]))
             for k, v in {"Content-Encoding": "aes128gcm", "Content-Type": "application/octet-stream", "TTL": "86400",
@@ -1287,7 +1339,7 @@ def send_push(title, body, url="/", tag=None):
             if e.code in (404, 410):
                 gone.append(sub["endpoint"])  # appareil désabonné ou app supprimée
             print("Notification refusée :", e.code, e.read()[:200], file=sys.stderr)
-        except (urllib.error.URLError, OSError, KeyError, ValueError) as e:
+        except (urllib.error.URLError, OSError, KeyError, ValueError, subprocess.TimeoutExpired) as e:
             print("Notification non envoyée :", repr(e), file=sys.stderr)
     if gone:
         with _push_lock:
@@ -1393,21 +1445,29 @@ def check_downloads(known, torrents):
 def r_push_info(_):
     if not PUSH_OK:
         return {"available": False}
-    return {"available": True, "key": b64u(raw_pub(vapid_key())), "devices": len(read_json(PUSH_FILE, [])),
+    return {"available": True, "key": b64u(raw_pub(vapid_key())), "devices": len(read_json(PUSH_FILE, [])), "apns": apns_ready(),
             "settings": public_settings(alert_settings())}
 
 
 def r_push_subscribe(d):
     if not PUSH_OK:
         raise ApiError(503, "Notifications indisponibles : mets à jour PVE Hub depuis le Shell de Proxmox")
-    sub = d.get("subscription") or {}
-    endpoint, keys = str(sub.get("endpoint", "")), sub.get("keys") or {}
-    if not endpoint.startswith("https://") or len(endpoint) > 1000 or not keys.get("p256dh") or not keys.get("auth"):
-        raise ApiError(400, "Abonnement invalide")
+    if d.get("apns"):  # app iOS native : jeton d'appareil APNs
+        token = str(d["apns"]).lower()
+        if not RE_APNS.match(token):
+            raise ApiError(400, "Jeton d'appareil invalide")
+        if not apns_ready():
+            raise ApiError(503, "Notifications iPhone non configurées sur ce serveur")
+        entry = {"endpoint": "apns:" + token}
+    else:
+        sub = d.get("subscription") or {}
+        endpoint, keys = str(sub.get("endpoint", "")), sub.get("keys") or {}
+        if not endpoint.startswith("https://") or len(endpoint) > 1000 or not keys.get("p256dh") or not keys.get("auth"):
+            raise ApiError(400, "Abonnement invalide")
+        entry = {"endpoint": endpoint, "keys": {"p256dh": str(keys["p256dh"]), "auth": str(keys["auth"])}}
     with _push_lock:
-        subs = [s for s in read_json(PUSH_FILE, []) if s["endpoint"] != endpoint]
-        subs.append({"endpoint": endpoint, "keys": {"p256dh": str(keys["p256dh"]), "auth": str(keys["auth"])},
-                     "name": str(d.get("name", ""))[:60], "at": int(time.time())})
+        subs = [s for s in read_json(PUSH_FILE, []) if s["endpoint"] != entry["endpoint"]]
+        subs.append({**entry, "name": str(d.get("name", ""))[:60], "at": int(time.time())})
         write_json(PUSH_FILE, subs)
     return {"ok": True, "devices": len(subs)}
 

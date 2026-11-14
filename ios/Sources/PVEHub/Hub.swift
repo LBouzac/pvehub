@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 enum Tab: Hashable { case server, guests, apps, exec, chat }
 
@@ -91,7 +92,23 @@ final class Hub: ObservableObject {
         async let v: () = checkVersion()
         async let m: () = loadMaint()
         async let c: () = chat.initChats()
-        _ = await (s, v, m, c)
+        async let p: Bool = enablePush()
+        _ = await (s, v, m, c, p)
+    }
+
+    // MARK: notifications natives (APNs)
+    /// Demande l'autorisation (la question n'apparaît qu'une fois), puis iOS rappelle sendPushToken avec le jeton de l'appareil
+    @discardableResult
+    func enablePush() async -> Bool {
+        guard (try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])) == true else { return false }
+        UIApplication.shared.registerForRemoteNotifications()
+        return true
+    }
+    func sendPushToken(_ token: String) async {
+        UserDefaults.standard.set(token, forKey: "apnsToken")
+        guard loggedIn else { return }
+        // serveur sans clé APNs : il refuse, les alertes restent sur la version web (voir Réglages)
+        _ = try? await API.shared.post("/api/push/subscribe", ["apns": token, "name": UIDevice.current.name])
     }
 
     func refresh() async {
@@ -105,6 +122,8 @@ final class Hub: ObservableObject {
     }
 
     func logout() async {
+        // plus d'alertes sur ce téléphone une fois déconnecté
+        if let t = UserDefaults.standard.string(forKey: "apnsToken") { _ = try? await API.shared.post("/api/push/unsubscribe", ["endpoint": "apns:" + t]) }
         _ = try? await API.shared.post("/api/logout")
         Keychain.set(nil)
         UserDefaults.standard.removeObject(forKey: "apps")

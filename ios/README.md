@@ -30,7 +30,7 @@ xtool ne produit pas une build acceptée par l'App Store ; le workflow `.github/
 sur un Mac de GitHub (projet généré par XcodeGen depuis `project.yml`, même code que pour xtool). Une fois pour toutes :
 
 1. Sur [developer.apple.com](https://developer.apple.com/account/resources/identifiers/list) → *Identifiers* → *+* →
-   *App IDs* : enregistrer `com.lbouzac.pvehub` (sans capacité particulière).
+   *App IDs* : enregistrer `com.lbouzac.pvehub` avec la capacité *Push Notifications*.
 2. Sur [App Store Connect](https://appstoreconnect.apple.com) : *Apps* → *+* → nouvelle app iOS, identifiant
    `com.lbouzac.pvehub`. Le nom doit être unique sur l'App Store : si « PVE Hub » est pris, mets-en un autre
    (le nom sous l'icône reste « PVE Hub »).
@@ -42,6 +42,18 @@ numérotée automatiquement. Dans App Store Connect → *TestFlight* → *Tests 
 installe depuis l'app TestFlight de l'iPhone. Chaque build reste installable 90 jours : relance le workflow pour une
 nouvelle version.
 
+## Notifications sur l'iPhone (APNs)
+
+Le serveur envoie les alertes à Apple avec une clé du compte développeur. Une fois pour toutes :
+
+1. Sur [developer.apple.com](https://developer.apple.com/account/resources/authkeys/list) → *Keys* → *+* : cocher
+   *Apple Push Notifications service (APNs)*, environnement *Production*, puis télécharger `AuthKey_XXXXXXXXXX.p8`.
+2. Dans le conteneur PVE Hub : copier la clé en `/opt/pvehub/data/apns.p8` (`chown pvehub`, `chmod 600`), et ajouter à
+   `/opt/pvehub/.env` `APNS_KEY_ID=XXXXXXXXXX` et `APNS_TEAM_ID=776JL5KQTK`. Puis mettre à jour PVE Hub (installe
+   `curl`, nécessaire car APNs n'accepte que HTTP/2) ou redémarrer `rc-service pvehub restart`.
+
+L'app demande l'autorisation à la connexion ; *Réglages* → *Notifications* indique si l'iPhone est abonné.
+
 ## Vérifier la logique sous Linux
 
 ```bash
@@ -50,8 +62,8 @@ cd ios && swiftc Sources/PVEHub/Logic.swift Checks/main.swift -o /tmp/pvehub-che
 
 ## Limites
 
-- **Notifications** : pas encore de push natif (il faudrait que le serveur envoie à APNs avec une clé du compte payant).
-  Les alertes continuent d'arriver sur la version web installée depuis Safari.
+- **Notifications** : seulement avec la build TestFlight (pas avec `xtool dev`), et si le serveur a la clé APNs (voir
+  ci-dessous). Sinon, les alertes arrivent sur la version web installée depuis Safari.
 - **Installée avec `xtool dev`** : le profil peut expirer au bout de 7 jours ; relance `xtool dev`, ou passe par
   TestFlight.
 - Pas de « Quoi de neuf » ni des fonds teinté et contrasté, propres à la version web.

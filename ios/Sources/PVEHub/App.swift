@@ -1,7 +1,32 @@
 import SwiftUI
+import UserNotifications
+
+/// Notifications natives : jeton APNs envoyé au serveur, bannière même app ouverte, toucher = ouvrir l'écran lié
+final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+    func application(_ app: UIApplication, didFinishLaunchingWithOptions o: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        UNUserNotificationCenter.current().delegate = self
+        return true
+    }
+    func application(_ app: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken t: Data) {
+        let token = t.map { String(format: "%02x", $0) }.joined()
+        Task { @MainActor in await Hub.shared.sendPushToken(token) }
+    }
+    func application(_ app: UIApplication, didFailToRegisterForRemoteNotificationsWithError e: Error) {
+        print("APNs :", e.localizedDescription)  // build xtool sans droit push, ou pas de réseau
+    }
+    func userNotificationCenter(_ c: UNUserNotificationCenter, willPresent n: UNNotification) async -> UNNotificationPresentationOptions {
+        [.banner, .list, .sound]
+    }
+    func userNotificationCenter(_ c: UNUserNotificationCenter, didReceive r: UNNotificationResponse) async {
+        // même lien que la version web : « /#maint », « /#g=lxc/101 »…
+        let url = r.notification.request.content.userInfo["url"] as? String ?? ""
+        await MainActor.run { Hub.shared.openLink(String(url.drop { $0 == "/" || $0 == "#" })) }
+    }
+}
 
 @main
 struct PVEHubApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var delegate
     @StateObject private var hub = Hub.shared
     @AppStorage("mode") private var mode = "auto"
     @AppStorage("accent") private var accent = "blue"

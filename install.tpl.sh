@@ -120,7 +120,7 @@ provision() {
   for _ in $(seq 30); do ctsh "$id" "nslookup dl-cdn.alpinelinux.org >/dev/null 2>&1" && break; sleep 2; done
 
   say "Installation de Python (seule dépendance)"
-  ctsh "$id" "apk add -q --no-cache python3 py3-cryptography tzdata && adduser -S -D -H -h /opt/pvehub/ssh -s /sbin/nologin pvehub"
+  ctsh "$id" "apk add -q --no-cache python3 py3-cryptography tzdata curl && adduser -S -D -H -h /opt/pvehub/ssh -s /sbin/nologin pvehub"
   push_app "$id"
   cat > "$WORK/initd" <<'EOF'
 #!/sbin/openrc-run
@@ -193,9 +193,9 @@ update)
   CTID=${2:?usage : bash pvehub-install.sh update <CTID>}
   say "Mise à jour de PVE Hub dans le CT $CTID"
   push_app "$CTID"
-  # notifications (chiffrement) et fuseaux horaires (rapport du matin) ; déjà là = rien à faire
-  ctsh "$CTID" "if command -v apk >/dev/null; then apk add -q --no-cache py3-cryptography tzdata;
-    else DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3-cryptography tzdata >/dev/null; fi" || echo "⚠️  Modules optionnels non installés (le reste fonctionne)."
+  # notifications (chiffrement, curl pour APNs) et fuseaux horaires (rapport du matin) ; déjà là = rien à faire
+  ctsh "$CTID" "if command -v apk >/dev/null; then apk add -q --no-cache py3-cryptography tzdata curl;
+    else DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3-cryptography tzdata curl >/dev/null; fi" || echo "⚠️  Modules optionnels non installés (le reste fonctionne)."
   setup_exec "$CTID" || true
   grant_store || echo "⚠️  Droits du Store non accordés (le reste fonctionne)."
   ctsh "$CTID" "chown -R pvehub /opt/pvehub"

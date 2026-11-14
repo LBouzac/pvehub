@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 struct SettingsView: View {
     @EnvironmentObject var hub: Hub
@@ -7,6 +8,7 @@ struct SettingsView: View {
     @AppStorage("mode") private var mode = "auto"
     @AppStorage("accent") private var accent = "blue"
     @State private var push: J?
+    @State private var allowed: UNAuthorizationStatus?
     @State private var remote: J?
     @State private var auth: J?
     @State private var checking = false
@@ -34,6 +36,7 @@ struct SettingsView: View {
                 async let r = try? API.shared.get("/api/remote")
                 async let a = try? API.shared.get("/api/auth")
                 (push, remote, auth) = await (p ?? J(["available": false]), r, a)
+                allowed = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
             }
         }
     }
@@ -71,11 +74,27 @@ struct SettingsView: View {
                         Text("Le module de notifications n'est pas installé. Relance la mise à jour de PVE Hub.").font(.subheadline).foregroundStyle(.secondary)
                     }
                 } else {
-                    // shortcut: pas de push natif (APNs exige un compte Apple Developer payant et un relais côté serveur) ; les alertes arrivent sur les appareils abonnés via la version web
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Reçues via la version web")
-                        Text("Pour recevoir les alertes sur ce téléphone, ouvre PVE Hub dans Safari (adresse Tailscale en https), ajoute-le à l'écran d'accueil et active les notifications depuis ses Réglages.")
-                            .font(.subheadline).foregroundStyle(.secondary)
+                    if !p.apns.bool {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Reçues via la version web")
+                            Text("Ce serveur n'a pas de clé de notifications iPhone (APNs). Pour recevoir les alertes, ouvre PVE Hub dans Safari (adresse Tailscale en https), ajoute-le à l'écran d'accueil et active les notifications depuis ses Réglages.")
+                                .font(.subheadline).foregroundStyle(.secondary)
+                        }
+                    } else if allowed == .denied {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Notifications refusées")
+                            Text("Autorise-les pour PVE Hub dans les Réglages de l'iPhone.").font(.subheadline).foregroundStyle(.secondary)
+                        }
+                        Button("Ouvrir les Réglages de l'iPhone") { UIApplication.shared.open(URL(string: UIApplication.openSettingsURLString)!) }
+                    } else if allowed == .authorized {
+                        Label("Activées sur cet iPhone", systemImage: "checkmark.circle.fill")
+                    } else {
+                        Button("Activer les notifications sur cet iPhone") {
+                            Task {
+                                await hub.enablePush()
+                                allowed = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+                            }
+                        }
                     }
                     Button("Envoyer une notification de test") {
                         Task {

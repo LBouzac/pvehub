@@ -10,6 +10,10 @@ targets:
     sources:
       - Sources/PVEHub
       - Assets.xcassets
+    entitlements:  # notifications push (TestFlight et App Store : APNs de production)
+      path: PVEHub.entitlements
+      properties:
+        aps-environment: production
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.lbouzac.pvehub
