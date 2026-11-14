@@ -223,9 +223,16 @@ struct SettingsView: View {
                 .disabled(checking)
             }
         } header: { Text("Mise à jour") } footer: {
-            Text((hub.ver?.checked_at.opt.map { "Dernière vérification : \(when($0)). " } ?? "") + "Vérification automatique une fois par semaine."
-                 + (hub.ver != nil && hub.ver?.can_update.bool != true ? "\n" + (hub.ver?.why_not.str ?? "") : ""))
+            Text(updateFooter)
         }
+    }
+
+    // découpé en étapes typées : en une seule expression, le compilateur d'Xcode abandonne (« unable to type-check »)
+    private var updateFooter: String {
+        var s = "Vérification automatique une fois par semaine."
+        if let d = hub.ver?.checked_at.opt { s = "Dernière vérification : \(when(d)). " + s }
+        if let v = hub.ver, v.can_update.bool != true { s += "\n" + v.why_not.str }
+        return s
     }
 
     // MARK: sécurité
