@@ -1265,7 +1265,14 @@ def load_p8(text):
 
 
 def apns_config():
+    """Clé saisie dans l'app, sinon APNS_TEAM_ID, APNS_KEY_ID et APNS_KEY_FILE (chemin du .p8) dans .env."""
     c = read_json(APNS_FILE, {})
+    if not c.get("key") and os.environ.get("APNS_KEY_FILE"):
+        try:
+            with open(os.environ["APNS_KEY_FILE"], encoding="utf-8") as f:
+                c = {"team": os.environ.get("APNS_TEAM_ID", ""), "key_id": os.environ.get("APNS_KEY_ID", ""), "key": f.read()}
+        except OSError as e:
+            print("Clé APNs illisible :", repr(e), file=sys.stderr)
     return c if c.get("team") and c.get("key_id") and c.get("key") else None
 
 

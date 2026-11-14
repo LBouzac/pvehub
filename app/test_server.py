@@ -106,6 +106,10 @@ if srv.PUSH_OK:
     code[0] = "400"  # jeton refusé : l'abonnement disparaît
     assert srv.send_push("T", "B") == 0 and srv.read_json(srv.PUSH_FILE, None) == []
     assert srv.r_push_apns({"key": ""})["apns"] is False and srv.apns_config() is None
+    with open(os.path.join(srv.DATA_DIR, "k.p8"), "w") as f:
+        f.write(p8)
+    os.environ.update(APNS_TEAM_ID="ABCDE12345", APNS_KEY_ID="KEY1234567", APNS_KEY_FILE=f.name)
+    assert srv.apns_config()["team"] == "ABCDE12345"  # repli sur .env
     srv.subprocess = real_subprocess
 else:
     print("(cryptography absent : test des notifications ignoré)")
