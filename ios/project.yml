@@ -1,0 +1,25 @@
+# Projet Xcode pour TestFlight / App Store, généré sur Mac par XcodeGen (voir .github/workflows/ios.yml).
+# Le code est le même que pour xtool ; Xcode ajoute ce qu'exige l'App Store (icône en catalogue, version du SDK).
+name: PVEHub
+options:
+  deploymentTarget: { iOS: "17.0" }
+targets:
+  PVEHub:
+    type: application
+    platform: iOS
+    sources:
+      - Sources/PVEHub
+      - Assets.xcassets
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lbouzac.pvehub
+        PRODUCT_NAME: PVEHub
+        INFOPLIST_FILE: Info.plist
+        GENERATE_INFOPLIST_FILE: YES
+        # GENERATE_INFOPLIST_FILE écrase les versions d'Info.plist par celles-ci (le numéro de build vient du workflow)
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.0" # comme swiftLanguageMode(.v5) dans Package.swift
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGN_STYLE: Automatic

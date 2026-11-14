@@ -1,0 +1,4 @@
+version: 1
+bundleID: com.lbouzac.pvehub
+infoPath: Info.plist
+iconPath: Resources/AppIcon.png

@@ -1,0 +1,48 @@
+# Lancé à la main (onglet Actions) : compile l'app iOS sur un Mac de GitHub et l'envoie sur TestFlight.
+# Secrets du dépôt : APPLE_TEAM_ID, ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY (contenu du fichier .p8). Voir ios/README.md.
+name: iOS TestFlight
+
+on: workflow_dispatch
+
+jobs:
+  testflight:
+    runs-on: macos-26
+    defaults:
+      run:
+        working-directory: ios
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Projet Xcode
+        run: |
+          brew install xcodegen
+          mkdir -p Assets.xcassets/AppIcon.appiconset
+          cp Resources/AppIcon.png Assets.xcassets/AppIcon.appiconset/
+          echo '{"images":[{"filename":"AppIcon.png","idiom":"universal","platform":"ios","size":"1024x1024"}],"info":{"author":"xcode","version":1}}' > Assets.xcassets/AppIcon.appiconset/Contents.json
+          xcodegen
+
+      - name: Archive et envoi sur TestFlight
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY: ${{ secrets.ASC_KEY }}
+        run: |
+          echo "$ASC_KEY" > "$RUNNER_TEMP/key.p8"
+          AUTH=(-allowProvisioningUpdates -authenticationKeyPath "$RUNNER_TEMP/key.p8" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
+          # archive non signée : la signature (certificat géré par Apple) se fait à l'export
+          xcodebuild archive -project PVEHub.xcodeproj -scheme PVEHub -destination generic/platform=iOS \
+            -archivePath "$RUNNER_TEMP/PVEHub.xcarchive" DEVELOPMENT_TEAM="$TEAM_ID" CODE_SIGNING_ALLOWED=NO \
+            CURRENT_PROJECT_VERSION="${{ github.run_number }}.${{ github.run_attempt }}" # unique à chaque envoi, relances comprises
+          cat > "$RUNNER_TEMP/export.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>teamID</key><string>$TEAM_ID</string>
+          </dict></plist>
+          PLIST
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/PVEHub.xcarchive" \
+            -exportOptionsPlist "$RUNNER_TEMP/export.plist" -exportPath "$RUNNER_TEMP/export" "${AUTH[@]}"
