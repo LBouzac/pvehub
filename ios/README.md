@@ -48,9 +48,24 @@ Le serveur envoie les alertes à Apple avec une clé du compte développeur. Une
 
 1. Sur [developer.apple.com](https://developer.apple.com/account/resources/authkeys/list) → *Keys* → *+* : cocher
    *Apple Push Notifications service (APNs)*, environnement *Production*, puis télécharger `AuthKey_XXXXXXXXXX.p8`.
-2. Dans le conteneur PVE Hub : copier la clé en `/opt/pvehub/data/apns.p8` (`chown pvehub`, `chmod 600`), et ajouter à
-   `/opt/pvehub/.env` `APNS_KEY_ID=XXXXXXXXXX` et `APNS_TEAM_ID=776JL5KQTK`. Puis mettre à jour PVE Hub (installe
-   `curl`, nécessaire car APNs n'accepte que HTTP/2) ou redémarrer `rc-service pvehub restart`.
+2. Depuis le PC, envoyer la clé sur le Proxmox (mot de passe root demandé) :
+
+   ```bash
+   scp ~/.config/asc/AuthKey_XXXXXXXXXX.p8 root@IP_DU_PROXMOX:/tmp/apns.p8
+   ```
+
+3. Dans le Shell du Proxmox (`pct list` donne le numéro du conteneur PVE Hub) : la clé va dans le conteneur, les
+   identifiants dans `.env`, et `curl` est installé (APNs n'accepte que HTTP/2) :
+
+   ```bash
+   CT=100
+   pct push $CT /tmp/apns.p8 /opt/pvehub/data/apns.p8 && rm /tmp/apns.p8
+   pct exec $CT -- sh -c 'chown pvehub /opt/pvehub/data/apns.p8 && chmod 600 /opt/pvehub/data/apns.p8 &&
+     printf "APNS_KEY_ID=XXXXXXXXXX\nAPNS_TEAM_ID=776JL5KQTK\n" >> /opt/pvehub/.env &&
+     apk add -q --no-cache curl && rc-service pvehub restart'
+   ```
+
+4. Mettre PVE Hub à jour (*Réglages* → *Mise à jour*) si ce n'est pas déjà fait : le serveur doit savoir parler à APNs.
 
 L'app demande l'autorisation à la connexion ; *Réglages* → *Notifications* indique si l'iPhone est abonné.
 
