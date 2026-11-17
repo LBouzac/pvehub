@@ -189,6 +189,28 @@ enum ToastWindow {
     }
 }
 
+/// Toucher hors d'un champ texte baisse le clavier, partout dans l'app (feuilles comprises)
+final class TapOutsideKeyboard: NSObject, UIGestureRecognizerDelegate {
+    private static let shared = TapOutsideKeyboard()
+    private static var installed = false
+    static func install() {
+        guard !installed, let w = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first?
+            .windows.first(where: { $0.windowLevel == .normal }) else { return }
+        let tap = UITapGestureRecognizer(target: shared, action: #selector(tap(_:)))
+        tap.cancelsTouchesInView = false  // les boutons et la liste reçoivent toujours le toucher
+        tap.delegate = shared
+        w.addGestureRecognizer(tap)
+        installed = true
+    }
+    @objc private func tap(_ g: UITapGestureRecognizer) { g.view?.endEditing(true) }
+    func gestureRecognizer(_ g: UIGestureRecognizer, shouldReceive t: UITouch) -> Bool {
+        var v = t.view
+        while let x = v { if x is UITextField || x is UITextView { return false }; v = x.superview }
+        return true
+    }
+    func gestureRecognizer(_ g: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith o: UIGestureRecognizer) -> Bool { true }
+}
+
 struct ToastStack: View {
     @EnvironmentObject var hub: Hub
     var body: some View {

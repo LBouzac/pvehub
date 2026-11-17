@@ -74,7 +74,7 @@ struct Root: View {
             }
         }
         .keyboardDismiss()
-        .onAppear { ToastWindow.install(hub) }
+        .onAppear { ToastWindow.install(hub); TapOutsideKeyboard.install() }
         .task { await hub.start() }
         // rafraîchissement toutes les 5 s, en pause quand l'app est en arrière-plan
         .task(id: phase == .active && hub.loggedIn) {
