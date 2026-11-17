@@ -334,6 +334,7 @@ struct ResourcesSheet: View {
                     Text((diskSize.isEmpty ? "" : "Disque actuel : \(diskSize). ") + "Proxmox ne sait pas réduire un disque.")
                 }
             }
+            .keyboardDismiss()
             .navigationTitle("Ressources")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

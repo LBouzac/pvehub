@@ -255,6 +255,7 @@ struct CronEditor: View {
                     Text(preview)
                 } footer: { Text("Une seule ligne. Exécutée par root\(target.contains("host") ? " sur l'hôte Proxmox" : " dans le conteneur").") }
             }
+            .keyboardDismiss()
             .navigationTitle(edit.job == nil ? "Nouvelle tâche" : "Modifier")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

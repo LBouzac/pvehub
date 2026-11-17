@@ -73,6 +73,7 @@ struct Root: View {
                 LoginView()
             }
         }
+        .keyboardDismiss()
         .onAppear { ToastWindow.install(hub) }
         .task { await hub.start() }
         // rafraîchissement toutes les 5 s, en pause quand l'app est en arrière-plan
@@ -144,6 +145,18 @@ struct HubToolbar: ViewModifier {
 }
 extension View {
     func hubToolbar(live: Bool = true) -> some View { modifier(HubToolbar(live: live)) }
+    /// Bouton au-dessus du clavier pour le baisser (champs multilignes et pavé numérique n'ont pas de touche « retour »)
+    func keyboardDismiss() -> some View {
+        toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button { UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil) } label: {
+                    Image(systemName: "keyboard.chevron.compact.down")
+                }
+                .accessibilityLabel("Masquer le clavier")
+            }
+        }
+    }
 }
 
 struct LoginView: View {
